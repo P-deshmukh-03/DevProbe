@@ -3,18 +3,584 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevProbe</title>
+  <title>DevProbe — API Testing &amp; Documentation Platform</title>
+  <meta name="description" content="DevProbe is a lightweight, developer-first API testing and documentation platform for debugging and organizing HTTP requests.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23388bfd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/></svg>">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Welcome to DevProbe</h1>
+  <!-- Application Container -->
+  <div class="app-layout">
+
+    <!-- Top Navigation Bar -->
+    <header class="top-nav" role="banner">
+      <div class="nav-left">
+        <!-- Sidebar Toggle for Mobile/Desktop -->
+        <button id="btn-toggle-sidebar" class="btn-icon" aria-label="Toggle navigation sidebar" title="Toggle Sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <!-- Brand Logo & Name -->
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polygon points="12 6 15.5 14 8.5 14"></polygon>
+              <line x1="12" y1="14" x2="12" y2="18"></line>
+            </svg>
+          </div>
+          <span class="brand-title">DevProbe</span>
+          <span class="badge badge-subtle">Day 2: UI Workspace</span>
+        </div>
+
+        <div class="nav-divider" aria-hidden="true"></div>
+
+        <!-- Workspace Selector Placeholder -->
+        <div class="workspace-selector">
+          <span class="workspace-label">Workspace:</span>
+          <button id="btn-workspace" class="btn-dropdown" aria-label="Current Workspace">
+            <span class="workspace-name">My Workspace</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <!-- Environment Selector -->
+        <div class="env-selector-container">
+          <label for="env-selector" class="sr-only">Select Environment</label>
+          <select id="env-selector" class="select-dropdown" aria-label="Environment Selector">
+            <option value="none">No Environment</option>
+            <option value="dev">Development (Local)</option>
+            <option value="staging">Staging</option>
+            <option value="prod">Production</option>
+          </select>
+        </div>
+
+        <!-- Settings Button -->
+        <button id="btn-settings" class="btn-icon" aria-label="Workspace Settings" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+
+        <!-- User Profile Avatar Placeholder -->
+        <div class="user-avatar" id="btn-user-avatar" title="User Profile (Prasad Deshmukh)" role="button" tabindex="0" aria-label="User Profile">
+          <span>PD</span>
+        </div>
+      </div>
     </header>
-    <main>
-      <p>Your API testing workspace is under development.</p>
-    </main>
+
+    <!-- Main Workspace Container -->
+    <div class="workspace-container">
+
+      <!-- Left Sidebar -->
+      <aside class="sidebar" id="sidebar" aria-label="Collections and History Sidebar">
+        
+        <!-- Sidebar Controls Header -->
+        <div class="sidebar-header">
+          <div class="sidebar-title-row">
+            <span class="sidebar-heading">COLLECTIONS</span>
+            <div class="sidebar-actions">
+              <button id="btn-new-collection" class="btn-text-action" title="Create New Collection">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Action: New Request Button -->
+          <button id="btn-sidebar-new-request" class="btn-sidebar-cta">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>New Request</span>
+          </button>
+
+          <!-- Search Filter -->
+          <div class="search-box">
+            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="sidebar-search" placeholder="Filter requests or collections..." aria-label="Filter requests">
+            <button id="btn-clear-search" class="btn-clear-search hidden" title="Clear search" aria-label="Clear search">&times;</button>
+          </div>
+        </div>
+
+        <!-- Sidebar Scrollable Content -->
+        <div class="sidebar-content">
+          <!-- Collections Section -->
+          <div class="sidebar-section">
+            <div class="collection-folder open" id="demo-collection-folder">
+              <div class="folder-header" id="folder-toggle-btn" role="button" tabindex="0" aria-expanded="true">
+                <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+                <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span class="folder-title">Demo Collection</span>
+                <span class="folder-badge" title="3 demonstration requests">3</span>
+              </div>
+
+              <!-- Collection Requests List -->
+              <div class="folder-items" id="collection-items">
+                <!-- Request Item 1: GET -->
+                <button class="request-item active" data-id="req-1" data-method="GET" data-name="Get User Profile" data-url="https://jsonplaceholder.typicode.com/users/1">
+                  <span class="method-badge method-get">GET</span>
+                  <span class="request-name">Get User Profile</span>
+                </button>
+
+                <!-- Request Item 2: POST -->
+                <button class="request-item" data-id="req-2" data-method="POST" data-name="Create New Post" data-url="https://jsonplaceholder.typicode.com/posts">
+                  <span class="method-badge method-post">POST</span>
+                  <span class="request-name">Create New Post</span>
+                </button>
+
+                <!-- Request Item 3: DELETE -->
+                <button class="request-item" data-id="req-3" data-method="DELETE" data-name="Remove Item" data-url="https://jsonplaceholder.typicode.com/posts/1">
+                  <span class="method-badge method-delete">DELETE</span>
+                  <span class="request-name">Remove Item</span>
+                </button>
+              </div>
+            </div>
+            <div id="no-filter-results" class="sidebar-empty-filter hidden">
+              No matching requests found
+            </div>
+          </div>
+
+          <!-- History Section -->
+          <div class="sidebar-section">
+            <div class="sidebar-section-title">
+              <span>HISTORY (DEMO)</span>
+              <span class="history-pill">Frontend demo</span>
+            </div>
+            <div class="history-list">
+              <button class="request-item" data-id="hist-1" data-method="GET" data-name="Get Users List" data-url="https://jsonplaceholder.typicode.com/users">
+                <span class="method-badge method-get">GET</span>
+                <span class="request-name">/users</span>
+                <span class="request-sub">200 OK</span>
+              </button>
+              <button class="request-item" data-id="hist-2" data-method="POST" data-name="Login Authenticate" data-url="https://jsonplaceholder.typicode.com/posts">
+                <span class="method-badge method-post">POST</span>
+                <span class="request-name">/posts</span>
+                <span class="request-sub">201 Created</span>
+              </button>
+              <button class="request-item" data-id="hist-3" data-method="GET" data-name="Check Server Health" data-url="http://localhost:3000/api/health">
+                <span class="method-badge method-get">GET</span>
+                <span class="request-name">/api/health</span>
+                <span class="request-sub">Local</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar Footer Note -->
+        <div class="sidebar-footer">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <span>Demo data only. Database persistence planned for Day 9.</span>
+        </div>
+      </aside>
+
+      <!-- Main Central Workspace -->
+      <main class="main-content" role="main">
+
+        <!-- Request Tabs Bar -->
+        <div class="request-tabs-bar" role="tablist" aria-label="Request tabs">
+          <div class="tabs-scroll-area" id="tabs-scroll-area">
+            <div class="tab-item active" id="active-tab" role="tab" aria-selected="true" tabindex="0">
+              <span class="tab-method-badge method-get" id="tab-method-label">GET</span>
+              <span class="tab-title" id="tab-title-label">Get User Profile</span>
+              <button class="tab-close-btn" id="btn-close-tab" aria-label="Close tab" title="Reset tab">&times;</button>
+            </div>
+          </div>
+          <button id="btn-new-tab" class="btn-new-tab" aria-label="Open New Request Tab" title="New Request">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Request Editor & Workspace Panels -->
+        <div class="request-workspace">
+
+          <!-- Request URL & Action Bar -->
+          <section class="request-bar-container" aria-label="HTTP Request Bar">
+            <div class="request-bar">
+              <!-- HTTP Method Selector Dropdown -->
+              <div class="method-select-wrapper">
+                <label for="http-method-select" class="sr-only">HTTP Method</label>
+                <select id="http-method-select" class="http-method-select method-color-get" aria-label="HTTP Method">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </div>
+
+              <!-- API URL Input -->
+              <div class="url-input-wrapper">
+                <label for="request-url-input" class="sr-only">Request URL</label>
+                <input type="text" id="request-url-input" class="request-url-input" placeholder="Enter request URL (e.g. https://jsonplaceholder.typicode.com/users/1)" value="https://jsonplaceholder.typicode.com/users/1" spellcheck="false" autocomplete="off">
+              </div>
+
+              <!-- Send Button -->
+              <button id="btn-send-request" class="btn btn-send" title="Send Request">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+                <span>Send</span>
+              </button>
+
+              <!-- Save Button -->
+              <button id="btn-save-request" class="btn btn-save" title="Save Request to Collection">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                <span>Save</span>
+              </button>
+            </div>
+          </section>
+
+          <!-- Request Configuration Tabs (Params, Headers, Body, Auth) -->
+          <section class="request-config-section" aria-label="Request Configuration">
+            <nav class="config-tabs-nav" role="tablist">
+              <button class="config-tab active" data-tab="params" role="tab" aria-selected="true" id="tab-btn-params">
+                Params <span class="tab-counter" id="params-count">0</span>
+              </button>
+              <button class="config-tab" data-tab="headers" role="tab" aria-selected="false" id="tab-btn-headers">
+                Headers <span class="tab-counter" id="headers-count">2</span>
+              </button>
+              <button class="config-tab" data-tab="body" role="tab" aria-selected="false" id="tab-btn-body">
+                Body <span class="tab-status-dot hidden" id="body-active-dot"></span>
+              </button>
+              <button class="config-tab" data-tab="auth" role="tab" aria-selected="false" id="tab-btn-auth">
+                Auth <span class="tab-sublabel" id="auth-sublabel">None</span>
+              </button>
+            </nav>
+
+            <!-- Configuration Panels Container -->
+            <div class="config-panels">
+
+              <!-- 1. PARAMS PANEL -->
+              <div class="config-panel active" id="panel-params" role="tabpanel" aria-labelledby="tab-btn-params">
+                <div class="panel-section-header">
+                  <span class="panel-title">Query Parameters</span>
+                  <button id="btn-add-param" class="btn-sm btn-outline">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    Add Parameter
+                  </button>
+                </div>
+
+                <div class="table-responsive">
+                  <table class="kv-table" id="params-table">
+                    <thead>
+                      <tr>
+                        <th class="col-check" title="Enable/Disable parameter"></th>
+                        <th class="col-key">Key</th>
+                        <th class="col-val">Value</th>
+                        <th class="col-desc">Description</th>
+                        <th class="col-action"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="params-tbody">
+                      <!-- Default dynamic rows populated by JS -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- 2. HEADERS PANEL -->
+              <div class="config-panel" id="panel-headers" role="tabpanel" aria-labelledby="tab-btn-headers">
+                <div class="panel-section-header">
+                  <span class="panel-title">HTTP Request Headers</span>
+                  <button id="btn-add-header" class="btn-sm btn-outline">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    Add Header
+                  </button>
+                </div>
+
+                <div class="table-responsive">
+                  <table class="kv-table" id="headers-table">
+                    <thead>
+                      <tr>
+                        <th class="col-check" title="Enable/Disable header"></th>
+                        <th class="col-key">Key</th>
+                        <th class="col-val">Value</th>
+                        <th class="col-desc">Description</th>
+                        <th class="col-action"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="headers-tbody">
+                      <!-- Default populated by JS -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- 3. BODY PANEL -->
+              <div class="config-panel" id="panel-body" role="tabpanel" aria-labelledby="tab-btn-body">
+                <div class="body-controls-row">
+                  <span class="body-type-label">Body Content Type:</span>
+                  <div class="body-type-selector">
+                    <label class="radio-chip">
+                      <input type="radio" name="body-type" value="none" checked>
+                      <span>None</span>
+                    </label>
+                    <label class="radio-chip">
+                      <input type="radio" name="body-type" value="json">
+                      <span>JSON (application/json)</span>
+                    </label>
+                    <label class="radio-chip">
+                      <input type="radio" name="body-type" value="text">
+                      <span>Text (text/plain)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Body Editor View -->
+                <div class="body-editor-container" id="body-editor-container">
+                  <div class="body-none-message" id="body-none-msg">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                    <p>This request does not have a request body.</p>
+                    <span class="subtext">Select <strong>JSON</strong> or <strong>Text</strong> above to provide payload data.</span>
+                  </div>
+
+                  <div class="body-input-area hidden" id="body-input-wrapper">
+                    <div class="editor-header">
+                      <span class="editor-mode-badge" id="editor-format-label">JSON Editor</span>
+                      <button id="btn-format-json" class="btn-xs btn-ghost">Beautify JSON</button>
+                    </div>
+                    <textarea id="body-textarea" class="code-textarea" placeholder="{\n  &quot;title&quot;: &quot;foo&quot;,\n  &quot;body&quot;: &quot;bar&quot;,\n  &quot;userId&quot;: 1\n}" spellcheck="false"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. AUTH PANEL -->
+              <div class="config-panel" id="panel-auth" role="tabpanel" aria-labelledby="tab-btn-auth">
+                <div class="auth-config-container">
+                  <div class="auth-type-row">
+                    <label for="auth-type-select" class="form-label">Authorization Type:</label>
+                    <select id="auth-type-select" class="select-dropdown">
+                      <option value="none">No Auth</option>
+                      <option value="bearer">Bearer Token</option>
+                      <option value="basic">Basic Auth</option>
+                    </select>
+                  </div>
+
+                  <!-- Auth Option: None -->
+                  <div class="auth-subpanel" id="auth-subpanel-none">
+                    <div class="info-callout">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                      </svg>
+                      <span>This request does not pass any authorization credentials with headers.</span>
+                    </div>
+                  </div>
+
+                  <!-- Auth Option: Bearer Token -->
+                  <div class="auth-subpanel hidden" id="auth-subpanel-bearer">
+                    <div class="form-group">
+                      <label for="auth-bearer-token" class="form-label">Token</label>
+                      <div class="input-with-icon">
+                        <input type="text" id="auth-bearer-token" class="form-input font-mono" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." autocomplete="off">
+                      </div>
+                      <span class="form-hint">The token will be added to the request header as <code>Authorization: Bearer &lt;token&gt;</code>. (Stored in temporary frontend state only).</span>
+                    </div>
+                  </div>
+
+                  <!-- Auth Option: Basic Auth -->
+                  <div class="auth-subpanel hidden" id="auth-subpanel-basic">
+                    <div class="form-row-2">
+                      <div class="form-group">
+                        <label for="auth-basic-username" class="form-label">Username</label>
+                        <input type="text" id="auth-basic-username" class="form-input" placeholder="admin" autocomplete="off">
+                      </div>
+                      <div class="form-group">
+                        <label for="auth-basic-password" class="form-label">Password</label>
+                        <input type="password" id="auth-basic-password" class="form-input" placeholder="••••••••" autocomplete="off">
+                      </div>
+                    </div>
+                    <span class="form-hint">Credentials will be encoded into Base64 for the Authorization header. (Stored in temporary frontend state only).</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          <!-- Response Inspector Section -->
+          <section class="response-section" aria-label="Response Inspector">
+            <!-- Response Navigation and Status Header -->
+            <div class="response-header">
+              <nav class="response-tabs-nav" role="tablist">
+                <button class="response-tab active" data-tab="res-body" role="tab" aria-selected="true" id="res-tab-btn-body">
+                  Response Body
+                </button>
+                <button class="response-tab" data-tab="res-headers" role="tab" aria-selected="false" id="res-tab-btn-headers">
+                  Headers <span class="tab-counter" id="res-headers-count">0</span>
+                </button>
+                <button class="response-tab" data-tab="res-cookies" role="tab" aria-selected="false" id="res-tab-btn-cookies">
+                  Cookies
+                </button>
+              </nav>
+
+              <!-- Response Summary Metrics (Placeholders) -->
+              <div class="response-metrics" aria-label="Response Statistics">
+                <div class="metric-item" title="HTTP Status Code">
+                  <span class="metric-label">Status:</span>
+                  <span class="metric-badge" id="res-status-badge">—</span>
+                </div>
+                <div class="metric-item" title="Roundtrip Response Time">
+                  <span class="metric-label">Time:</span>
+                  <span class="metric-value font-mono" id="res-time-value">— ms</span>
+                </div>
+                <div class="metric-item" title="Response Payload Size">
+                  <span class="metric-label">Size:</span>
+                  <span class="metric-value font-mono" id="res-size-value">— B</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Response Panels -->
+            <div class="response-panels">
+
+              <!-- Response Body Panel -->
+              <div class="response-panel active" id="panel-res-body" role="tabpanel">
+                <div class="response-toolbar">
+                  <div class="response-format-selector">
+                    <button class="format-btn active" data-fmt="pretty">Pretty</button>
+                    <button class="format-btn" data-fmt="raw">Raw</button>
+                  </div>
+                  <div class="response-actions">
+                    <button id="btn-copy-response" class="btn-xs btn-ghost" title="Copy response content">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Empty State View (Honest: explains execution is coming in Day 5) -->
+                <div class="response-empty-state" id="response-empty-state">
+                  <div class="empty-state-icon">
+                    <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="2" y1="12" x2="22" y2="12"></line>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                  </div>
+                  <h3 class="empty-state-title">Ready to Send Request</h3>
+                  <p class="empty-state-desc">
+                    Configure your HTTP request parameters above and click <strong>Send</strong>.
+                  </p>
+                  <div class="empty-state-notice">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="16" x2="12" y2="12"></line>
+                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span><strong>Roadmap Notice:</strong> Actual backend API dispatch and response inspection will be implemented during <strong>Day 5</strong>.</span>
+                  </div>
+                </div>
+
+                <!-- Response Viewer Area (hidden until active simulation or Day 5 execution) -->
+                <div class="response-content-area hidden" id="response-content-area">
+                  <pre class="response-pre"><code id="response-code-display"></code></pre>
+                </div>
+              </div>
+
+              <!-- Response Headers Panel -->
+              <div class="response-panel" id="panel-res-headers" role="tabpanel">
+                <div class="response-empty-state">
+                  <p class="empty-state-desc">No response headers available yet. Send a request to inspect response headers.</p>
+                </div>
+              </div>
+
+              <!-- Response Cookies Panel -->
+              <div class="response-panel" id="panel-res-cookies" role="tabpanel">
+                <div class="response-empty-state">
+                  <p class="empty-state-desc">No cookies received for this request.</p>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+    </div>
+
+    <!-- Application Status Bar / Footer -->
+    <footer class="app-status-bar" role="contentinfo">
+      <div class="status-left">
+        <span class="status-brand">DevProbe</span>
+        <span class="status-separator">/</span>
+        <span class="status-indicator">
+          <span class="status-dot"></span>
+          <span>Frontend UI Ready (Day 2)</span>
+        </span>
+      </div>
+
+      <div class="status-center">
+        <span class="status-message">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          API Execution Engine will be connected in Phase 2 (Days 5–8)
+        </span>
+      </div>
+
+      <div class="status-right">
+        <span class="status-health" id="status-health-check" title="Backend Health Check">
+          Server: <a href="/api/health" target="_blank" rel="noopener" id="health-link" class="health-link">GET /api/health</a>
+        </span>
+      </div>
+    </footer>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
   </div>
+
+  <!-- Main JavaScript File -->
   <script src="js/app.js"></script>
 </body>
 </html>
