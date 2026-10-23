@@ -34,7 +34,7 @@
             </svg>
           </div>
           <span class="brand-title">DevProbe</span>
-          <span class="badge badge-subtle">Day 2: UI Workspace</span>
+          <span class="badge badge-subtle">Day 3: State &amp; Config</span>
         </div>
 
         <div class="nav-divider" aria-hidden="true"></div>
@@ -261,6 +261,24 @@
                 <span>Save</span>
               </button>
             </div>
+
+            <!-- Prepared URL Preview Bar (Day 3 Feature) -->
+            <div class="url-preview-bar" id="url-preview-bar" aria-live="polite">
+              <div class="url-preview-main">
+                <span class="url-preview-tag">PREPARED URL</span>
+                <span class="url-preview-url font-mono" id="url-preview-text">https://jsonplaceholder.typicode.com/users/1</span>
+              </div>
+              <div class="url-preview-actions">
+                <span class="url-preview-status badge-valid" id="url-preview-status">Ready</span>
+                <button id="btn-copy-preview-url" class="btn-xs btn-outline" title="Copy prepared URL to clipboard">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  <span>Copy</span>
+                </button>
+              </div>
+            </div>
           </section>
 
           <!-- Request Configuration Tabs (Params, Headers, Body, Auth) -->
@@ -318,14 +336,25 @@
               <div class="config-panel" id="panel-headers" role="tabpanel" aria-labelledby="tab-btn-headers">
                 <div class="panel-section-header">
                   <span class="panel-title">HTTP Request Headers</span>
-                  <button id="btn-add-header" class="btn-sm btn-outline">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                      <line x1="12" y1="5" x2="12" y2="19"></line>
-                      <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                    Add Header
-                  </button>
+                  <div class="panel-header-actions">
+                    <button id="btn-validate-headers" class="btn-sm btn-outline" title="Validate Header Syntax and Uniqueness">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                      Validate Headers
+                    </button>
+                    <button id="btn-add-header" class="btn-sm btn-outline">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                      Add Header
+                    </button>
+                  </div>
                 </div>
+
+                <!-- Header Validation Message Container -->
+                <div id="headers-validation-msg" class="validation-banner hidden" role="alert"></div>
 
                 <div class="table-responsive">
                   <table class="kv-table" id="headers-table">
@@ -379,8 +408,13 @@
                   <div class="body-input-area hidden" id="body-input-wrapper">
                     <div class="editor-header">
                       <span class="editor-mode-badge" id="editor-format-label">JSON Editor</span>
-                      <button id="btn-format-json" class="btn-xs btn-ghost">Beautify JSON</button>
+                      <div class="editor-actions">
+                        <span id="json-validation-badge" class="validation-chip hidden"></span>
+                        <button id="btn-validate-json" class="btn-xs btn-outline">Validate JSON</button>
+                        <button id="btn-format-json" class="btn-xs btn-ghost">Beautify JSON</button>
+                      </div>
                     </div>
+                    <div id="json-validation-msg" class="json-feedback-bar hidden" role="alert"></div>
                     <textarea id="body-textarea" class="code-textarea" placeholder="{\n  &quot;title&quot;: &quot;foo&quot;,\n  &quot;body&quot;: &quot;bar&quot;,\n  &quot;userId&quot;: 1\n}" spellcheck="false"></textarea>
                   </div>
                 </div>
@@ -396,6 +430,16 @@
                       <option value="bearer">Bearer Token</option>
                       <option value="basic">Basic Auth</option>
                     </select>
+                  </div>
+
+                  <!-- Authentication Notice (Day 3 / Day 5 Preparation) -->
+                  <div class="auth-roadmap-notice info-callout">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="16" x2="12" y2="12"></line>
+                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <span>Authentication credentials will be securely formatted and applied to request headers when the execution engine is connected in Day 5. Passwords and tokens are kept in temporary memory and are never saved to disk or URLs.</span>
                   </div>
 
                   <!-- Auth Option: None -->
@@ -553,7 +597,7 @@
         <span class="status-separator">/</span>
         <span class="status-indicator">
           <span class="status-dot"></span>
-          <span>Frontend UI Ready (Day 2)</span>
+          <span>Request Config &amp; State Engine Ready (Day 3)</span>
         </span>
       </div>
 
