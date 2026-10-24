@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test-day3.js && node test-day4.js",
+    "test:day3": "node test-day3.js",
+    "test:day4": "node test-day4.js"
   },
   "keywords": [],
   "author": "",
