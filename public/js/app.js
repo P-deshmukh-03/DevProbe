@@ -1384,6 +1384,382 @@ function initSidebar() {
   });
 }
 
+/* ==========================================================================
+   7.5. Active Response State and Response Viewer Rendering (Day 5)
+   ========================================================================== */
+
+/**
+ * State holding details of the most recent HTTP response.
+ */
+const activeResponse = {
+  status: null,
+  statusText: '',
+  timeMs: null,
+  sizeBytes: null,
+  headers: {},
+  body: null,
+  rawText: '',
+  isJson: false,
+  isBinary: false,
+  format: 'pretty' // 'pretty' | 'raw'
+};
+
+/**
+ * Marks response viewer as loading while a new request is being executed.
+ */
+function setResponseLoadingState() {
+  if (typeof document === 'undefined') return;
+  const statusBadge = document.getElementById('res-status-badge');
+  if (statusBadge) {
+    statusBadge.textContent = 'Sending...';
+    statusBadge.className = 'metric-badge';
+  }
+  const contentArea = document.getElementById('response-content-area');
+  if (contentArea) {
+    contentArea.style.opacity = '0.5';
+  }
+}
+
+/**
+ * Renders response body content according to current format selection (pretty or raw).
+ */
+function renderResponseBodyContent() {
+  if (typeof document === 'undefined') return;
+  const codeEl = document.getElementById('response-code-display');
+  if (!codeEl) return;
+
+  if (activeResponse.isBinary) {
+    codeEl.textContent = activeResponse.rawText;
+    return;
+  }
+
+  if (activeResponse.isJson && activeResponse.body !== null && typeof activeResponse.body === 'object') {
+    if (activeResponse.format === 'pretty') {
+      try {
+        codeEl.textContent = JSON.stringify(activeResponse.body, null, 2);
+      } catch {
+        codeEl.textContent = activeResponse.rawText;
+      }
+    } else {
+      try {
+        codeEl.textContent = JSON.stringify(activeResponse.body);
+      } catch {
+        codeEl.textContent = activeResponse.rawText;
+      }
+    }
+  } else {
+    codeEl.textContent = activeResponse.rawText || '(Empty response body)';
+  }
+}
+
+/**
+ * Renders safe response headers table into the Headers tab.
+ */
+function renderResponseHeadersPanel() {
+  if (typeof document === 'undefined') return;
+  const panel = document.getElementById('panel-res-headers');
+  const countBadge = document.getElementById('res-headers-count');
+  if (!panel) return;
+
+  const entries = Object.entries(activeResponse.headers || {});
+  if (countBadge) countBadge.textContent = entries.length.toString();
+
+  if (entries.length === 0) {
+    panel.innerHTML = '<div class="response-empty-state"><p class="empty-state-desc">No response headers received.</p></div>';
+    return;
+  }
+
+  const tableDiv = document.createElement('div');
+  tableDiv.className = 'table-responsive';
+  const table = document.createElement('table');
+  table.className = 'kv-table font-mono';
+  table.innerHTML = '<thead><tr><th style="width:35%;">Header</th><th>Value</th></tr></thead>';
+  const tbody = document.createElement('tbody');
+
+  entries.forEach(([key, val]) => {
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td');
+    tdKey.className = 'col-key';
+    tdKey.style.padding = '7px 10px';
+    tdKey.textContent = key;
+
+    const tdVal = document.createElement('td');
+    tdVal.className = 'col-val';
+    tdVal.style.padding = '7px 10px';
+    tdVal.style.wordBreak = 'break-all';
+    tdVal.textContent = typeof val === 'object' ? JSON.stringify(val) : String(val);
+
+    tr.appendChild(tdKey);
+    tr.appendChild(tdVal);
+    tbody.appendChild(tr);
+  });
+
+  table.appendChild(tbody);
+  tableDiv.appendChild(table);
+  panel.innerHTML = '';
+  panel.appendChild(tableDiv);
+}
+
+/**
+ * Renders cookie security policy notice into the Cookies tab.
+ */
+function renderResponseCookiesPanel() {
+  if (typeof document === 'undefined') return;
+  const panel = document.getElementById('panel-res-cookies');
+  if (!panel) return;
+
+  panel.innerHTML = `
+    <div class="info-callout" style="margin-top: 10px; line-height: 1.6;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <div>
+        <strong>Security Policy: Cookies Filtered</strong>
+        <p style="margin-top:4px; font-size: 11px;">
+          DevProbe deliberately filters <code>Set-Cookie</code> and ambient session headers from API responses.
+          This prevents upstream test endpoints from injecting cookies into your local session or leaking sensitive credentials across domains.
+        </p>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Renders successful or non-2xx upstream execution results into the UI.
+ * @param {object} responseData
+ */
+function renderResponseToUI(responseData) {
+  activeResponse.status = responseData.status;
+  activeResponse.statusText = responseData.statusText || '';
+  activeResponse.timeMs = responseData.timeMs;
+  activeResponse.sizeBytes = responseData.sizeBytes;
+  activeResponse.headers = responseData.headers || {};
+  activeResponse.body = responseData.body;
+
+  if (responseData.body && typeof responseData.body === 'object' && responseData.body.isBinary) {
+    activeResponse.isBinary = true;
+    activeResponse.isJson = false;
+    activeResponse.rawText = responseData.body.preview || '[Binary Content]';
+  } else if (responseData.body !== null && typeof responseData.body === 'object') {
+    activeResponse.isBinary = false;
+    activeResponse.isJson = true;
+    activeResponse.rawText = JSON.stringify(responseData.body, null, 2);
+  } else {
+    activeResponse.isBinary = false;
+    activeResponse.isJson = false;
+    activeResponse.rawText = responseData.body !== undefined && responseData.body !== null ? String(responseData.body) : '';
+  }
+
+  if (typeof document === 'undefined') return;
+
+  // 1. Status Badge
+  const statusBadge = document.getElementById('res-status-badge');
+  if (statusBadge) {
+    statusBadge.textContent = `${activeResponse.status} ${activeResponse.statusText}`;
+    statusBadge.className = 'metric-badge';
+    const s = activeResponse.status;
+    if (s >= 200 && s < 300) statusBadge.classList.add('badge-2xx');
+    else if (s >= 300 && s < 400) statusBadge.classList.add('badge-3xx');
+    else if (s >= 400 && s < 500) statusBadge.classList.add('badge-4xx');
+    else if (s >= 500) statusBadge.classList.add('badge-5xx');
+  }
+
+  // 2. Response Time
+  const timeVal = document.getElementById('res-time-value');
+  if (timeVal) {
+    timeVal.textContent = `${activeResponse.timeMs} ms`;
+  }
+
+  // 3. Response Size
+  const sizeVal = document.getElementById('res-size-value');
+  if (sizeVal) {
+    const b = activeResponse.sizeBytes;
+    if (b < 1024) {
+      sizeVal.textContent = `${b} B`;
+    } else {
+      sizeVal.textContent = `${(b / 1024).toFixed(1)} KB`;
+    }
+  }
+
+  // 4. Response Body display
+  const emptyState = document.getElementById('response-empty-state');
+  const contentArea = document.getElementById('response-content-area');
+  if (emptyState) emptyState.classList.add('hidden');
+  if (contentArea) {
+    contentArea.style.opacity = '1';
+    contentArea.classList.remove('hidden');
+  }
+
+  renderResponseBodyContent();
+
+  // 5. Response Headers panel
+  renderResponseHeadersPanel();
+
+  // 6. Response Cookies panel
+  renderResponseCookiesPanel();
+}
+
+/**
+ * Renders an execution error (e.g. timeout, SSRF blocked destination, DNS error).
+ * @param {string} message
+ * @param {string} code
+ */
+function renderResponseError(message, code = 'ERROR') {
+  if (typeof document === 'undefined') return;
+
+  const statusBadge = document.getElementById('res-status-badge');
+  if (statusBadge) {
+    statusBadge.textContent = `Error: ${code}`;
+    statusBadge.className = 'metric-badge badge-error';
+  }
+
+  const timeVal = document.getElementById('res-time-value');
+  if (timeVal) timeVal.textContent = '— ms';
+
+  const sizeVal = document.getElementById('res-size-value');
+  if (sizeVal) sizeVal.textContent = '— B';
+
+  const emptyState = document.getElementById('response-empty-state');
+  const contentArea = document.getElementById('response-content-area');
+  const codeEl = document.getElementById('response-code-display');
+
+  if (emptyState) emptyState.classList.add('hidden');
+  if (contentArea) {
+    contentArea.style.opacity = '1';
+    contentArea.classList.remove('hidden');
+  }
+
+  if (codeEl) {
+    codeEl.textContent = `Execution Failed: ${message}\nError Code: ${code}`;
+  }
+}
+
+/**
+ * Executes the active request by dispatching to POST /api/requests/execute.
+ */
+async function handleSendRequest() {
+  const prepared = prepareRequestUrl(
+    activeRequest.url,
+    activeRequest.params,
+    activeRequest.selectedEnvironment
+  );
+
+  if (!prepared.isValid) {
+    showToast('Cannot Send Request', prepared.error || 'Please check your URL configuration.', 'warning');
+    return;
+  }
+
+  // Validate headers before dispatch
+  const headerVal = validateHeaders(activeRequest.headers, false);
+  if (!headerVal.isValid) {
+    showToast('Header Issues Detected', headerVal.errors[0], 'warning');
+    return;
+  }
+
+  // Validate JSON body if JSON mode is active and non-empty
+  if (activeRequest.body.type === 'json' && activeRequest.body.text && activeRequest.body.text.trim()) {
+    const jsonVal = validateJsonBody(activeRequest.body.text, 'json', false);
+    if (!jsonVal.isValid) {
+      showToast('Invalid JSON Payload', jsonVal.message, 'warning');
+      return;
+    }
+  }
+
+  const btnSend = document.getElementById('btn-send-request');
+  const originalBtnHtml = btnSend ? btnSend.innerHTML : '';
+
+  // Assemble request headers map from enabled rows
+  const headersMap = {};
+  if (Array.isArray(activeRequest.headers)) {
+    activeRequest.headers.forEach(h => {
+      if (h.enabled && h.key && typeof h.key === 'string' && h.key.trim()) {
+        headersMap[h.key.trim()] = h.value !== undefined && h.value !== null ? String(h.value) : '';
+      }
+    });
+  }
+
+  // Prepare body payload
+  let bodyPayload = null;
+  if (activeRequest.body.type === 'json') {
+    bodyPayload = activeRequest.body.text ? activeRequest.body.text : null;
+  } else if (activeRequest.body.type === 'text') {
+    bodyPayload = activeRequest.body.text;
+  }
+
+  // Prepare auth payload
+  let authPayload = null;
+  if (activeRequest.auth && activeRequest.auth.type && activeRequest.auth.type !== 'none') {
+    authPayload = {
+      type: activeRequest.auth.type,
+      bearerToken: activeRequest.auth.bearerToken || '',
+      basicUsername: activeRequest.auth.basicUsername || '',
+      basicPassword: activeRequest.auth.basicPassword || ''
+    };
+  }
+
+  // Set loading state on Send button
+  if (btnSend) {
+    btnSend.disabled = true;
+    btnSend.classList.add('loading');
+    btnSend.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation: spin 0.8s linear infinite;">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"></circle>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"></path>
+      </svg>
+      <span>Sending...</span>
+    `;
+  }
+
+  setResponseLoadingState();
+
+  try {
+    const res = await fetch('/api/requests/execute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        method: activeRequest.method,
+        url: prepared.url,
+        headers: headersMap,
+        body: bodyPayload,
+        auth: authPayload
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.success && data.data) {
+      renderResponseToUI(data.data);
+      const s = data.data.status;
+      const toastType = s >= 200 && s < 400 ? 'success' : (s >= 400 && s < 500 ? 'warning' : 'warning');
+      showToast(
+        `Request Completed (${data.data.status} ${data.data.statusText})`,
+        `Roundtrip completed in ${data.data.timeMs}ms (${data.data.sizeBytes} bytes).`,
+        toastType
+      );
+    } else {
+      const errMsg = (data.error && data.error.message) || data.message || 'Request execution failed';
+      const errCode = data.error ? data.error.code : 'EXECUTION_ERROR';
+      renderResponseError(errMsg, errCode);
+      showToast('Execution Error', errMsg, 'warning');
+    }
+  } catch (err) {
+    const netErr = `Network error contacting DevProbe server: ${err.message}`;
+    renderResponseError(netErr, 'NETWORK_ERROR');
+    showToast('Connection Error', netErr, 'warning');
+  } finally {
+    if (btnSend) {
+      btnSend.disabled = false;
+      btnSend.classList.remove('loading');
+      btnSend.innerHTML = originalBtnHtml;
+    }
+  }
+}
+
 /**
  * Top Navigation and Workspace Action Buttons
  */
@@ -1391,31 +1767,7 @@ function initActionButtons() {
   // Send Button
   const btnSend = document.getElementById('btn-send-request');
   if (btnSend) {
-    btnSend.addEventListener('click', () => {
-      const prepared = prepareRequestUrl(
-        activeRequest.url,
-        activeRequest.params,
-        activeRequest.selectedEnvironment
-      );
-
-      if (!prepared.isValid) {
-        showToast('Cannot Send Request', prepared.error || 'Please check your URL configuration.', 'warning');
-        return;
-      }
-
-      // Validate headers before reporting ready
-      const headerVal = validateHeaders(activeRequest.headers, false);
-      if (!headerVal.isValid) {
-        showToast('Header Issues Detected', headerVal.errors[0], 'warning');
-        return;
-      }
-
-      showToast(
-        'Request Execution Planned for Day 5',
-        `Ready to dispatch ${activeRequest.method} request to: ${prepared.url}. API execution engine connects in Day 5.`,
-        'info'
-      );
-    });
+    btnSend.addEventListener('click', handleSendRequest);
   }
 
   // Save Button
@@ -1515,7 +1867,19 @@ function initResponseViewer() {
 
   if (btnCopy) {
     btnCopy.addEventListener('click', () => {
-      showToast('Response Viewer', 'No response data available to copy yet. Execute a request once Day 5 is released.', 'info');
+      const codeEl = document.getElementById('response-code-display');
+      const textToCopy = codeEl ? codeEl.textContent : '';
+      if (textToCopy && textToCopy !== '(Empty response body)') {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(textToCopy)
+            .then(() => showToast('Response Copied', 'Response body copied to clipboard.', 'success'))
+            .catch(() => showToast('Copy Failed', 'Clipboard permissions denied.', 'warning'));
+        } else {
+          showToast('Response Copied', 'Response content ready to copy.', 'info');
+        }
+      } else {
+        showToast('Nothing to Copy', 'No response body content available.', 'info');
+      }
     });
   }
 
@@ -1523,6 +1887,8 @@ function initResponseViewer() {
     btn.addEventListener('click', () => {
       formatButtons.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
+      activeResponse.format = btn.getAttribute('data-fmt') || 'pretty';
+      renderResponseBodyContent();
     });
   });
 }
@@ -1535,6 +1901,7 @@ function initResponseViewer() {
 if (typeof window !== 'undefined') {
   window.DevProbe = {
     activeRequest,
+    activeResponse,
     ENVIRONMENTS,
     getEnvironmentVariable,
     resolveVariables,
@@ -1544,6 +1911,9 @@ if (typeof window !== 'undefined') {
     beautifyJsonBody,
     loadRequestIntoState,
     updateUrlPreview,
+    handleSendRequest,
+    renderResponseToUI,
+    renderResponseError,
     showToast
   };
 }
@@ -1552,6 +1922,7 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     activeRequest,
+    activeResponse,
     ENVIRONMENTS,
     getEnvironmentVariable,
     resolveVariables,
@@ -1559,6 +1930,10 @@ if (typeof module !== 'undefined' && module.exports) {
     validateHeaders,
     validateJsonBody,
     beautifyJsonBody,
-    loadRequestIntoState
+    loadRequestIntoState,
+    handleSendRequest,
+    renderResponseToUI,
+    renderResponseError
   };
 }
+

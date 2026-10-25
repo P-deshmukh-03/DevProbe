@@ -126,6 +126,15 @@ function validateRequestPayload(req, res, next) {
     }
   }
 
+  // 7. Validate Settings (if provided)
+  let validatedSettings = {};
+  if (payload.settings !== undefined && payload.settings !== null) {
+    if (typeof payload.settings !== 'object' || Array.isArray(payload.settings)) {
+      return next(new AppError('Field \'settings\' must be a configuration object', 400, 'INVALID_SETTINGS'));
+    }
+    validatedSettings = payload.settings;
+  }
+
   // Attach normalized validated data to request object
   req.validatedRequest = {
     method: normalizedMethod,
@@ -138,7 +147,8 @@ function validateRequestPayload(req, res, next) {
       sizeBytes: bodySizeBytes,
       mediaType
     },
-    auth: payload.auth ?? null
+    auth: payload.auth ?? null,
+    settings: validatedSettings
   };
 
   next();

@@ -330,12 +330,27 @@ function validateTargetUrl(rawUrl, options = {}) {
 
   const lowerHostname = hostname.toLowerCase();
 
-  // If local targets are explicitly enabled for development testing, skip SSRF host checks
+  // 1. Prohibited Cloud Metadata must NEVER be allowed under any circumstance (even when allowLocal is true)
+  if (PROHIBITED_SPECIFIC_IPS.includes(lowerHostname)) {
+    return {
+      isValid: false,
+      error: `Access to cloud metadata service IP '${hostname}' is prohibited.`
+    };
+  }
+  const CLOUD_METADATA_HOSTNAMES = ['metadata.google.internal', 'instance-data', 'metadata'];
+  if (CLOUD_METADATA_HOSTNAMES.includes(lowerHostname)) {
+    return {
+      isValid: false,
+      error: `Access to prohibited cloud metadata hostname '${hostname}' is blocked for SSRF protection.`
+    };
+  }
+
+  // If local targets are explicitly enabled for development testing, skip localhost/private IP checks
   if (allowLocal) {
     return { isValid: true, parsedUrl: parsed };
   }
 
-  // 3. Reject Known Prohibited Hostnames and Domains
+  // 2. Reject Known Prohibited Hostnames and Domains
   if (PROHIBITED_HOSTNAMES.includes(lowerHostname)) {
     return {
       isValid: false,
@@ -350,14 +365,6 @@ function validateTargetUrl(rawUrl, options = {}) {
         error: `Access to local/internal domain '${hostname}' is blocked for SSRF protection.`
       };
     }
-  }
-
-  // 4. Reject Specific Cloud Metadata IPs
-  if (PROHIBITED_SPECIFIC_IPS.includes(lowerHostname)) {
-    return {
-      isValid: false,
-      error: `Access to cloud metadata service IP '${hostname}' is prohibited.`
-    };
   }
 
   // 5. Check if hostname is an IPv4 or IPv6 address literal
@@ -389,6 +396,219 @@ function validateTargetUrl(rawUrl, options = {}) {
 }
 
 /**
+ * Hop-by-hop headers that must not be proxied or forwarded per RFC 2616 / RFC 7230
+ */
+const HOP_BY_HOP_HEADERS = Object.freeze(new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade'
+]));
+
+/**
+ * Sensitive HTTP response headers filtered before returning response metadata to browser
+ */
+const SENSITIVE_RESPONSE_HEADERS = Object.freeze(new Set([
+  'set-cookie',
+  'set-cookie2'
+]));
+
+/**
+ * Checks whether an IP string (v4 or v6) is private, loopback, link-local, multicast, or reserved.
+ * @param {string} ipAddress
+ * @returns {{ isRestricted: boolean, reason?: string }}
+ */
+function isRestrictedIp(ipAddress) {
+  if (!ipAddress || typeof ipAddress !== 'string') {
+    return { isRestricted: true, reason: 'Invalid IP address format' };
+  }
+
+  let cleanIp = ipAddress.trim();
+  if (cleanIp.startsWith('[') && cleanIp.endsWith(']')) {
+    cleanIp = cleanIp.slice(1, -1);
+  }
+
+  const lowerIp = cleanIp.toLowerCase();
+  if (PROHIBITED_SPECIFIC_IPS.includes(lowerIp)) {
+    return { isRestricted: true, reason: `Restricted cloud metadata service IP (${cleanIp})` };
+  }
+
+  const ipType = net.isIP(cleanIp);
+  if (ipType === 4) {
+    const octets = cleanIp.split('.').map(Number);
+    const check = isPrivateOrReservedIPv4(octets);
+    if (check.isPrivate) {
+      return { isRestricted: true, reason: check.reason };
+    }
+  } else if (ipType === 6) {
+    const words = expandIPv6(cleanIp);
+    if (words) {
+      const check = isPrivateOrReservedIPv6(words);
+      if (check.isPrivate) {
+        return { isRestricted: true, reason: check.reason };
+      }
+    } else {
+      return { isRestricted: true, reason: 'Malformed IPv6 address' };
+    }
+  } else {
+    return { isRestricted: true, reason: 'Unrecognized IP address format' };
+  }
+
+  return { isRestricted: false };
+}
+
+const dns = require('dns');
+
+/**
+ * Resolves a hostname via DNS and validates ALL resolved destination IP addresses against SSRF policies.
+ * Returns pinned IP and family for connection pinning to prevent DNS rebinding attacks.
+ *
+ * @param {string} hostname - Target hostname or IP string
+ * @param {object} [options]
+ * @param {boolean} [options.allowLocal=false] - Development override to allow local destinations
+ * @param {Function} [options.dnsResolver] - Optional custom resolver for testing DNS behaviors
+ * @returns {Promise<{ isValid: boolean, error?: string, code?: string, addresses?: Array<{ address: string, family: number }>, pinnedIp?: string, pinnedFamily?: number }>}
+ */
+async function resolveAndValidateDestination(hostname, options = {}) {
+  const allowLocal = options.allowLocal ?? (process.env.DEVPROBE_ALLOW_LOCAL_TARGETS === 'true');
+
+  if (typeof hostname !== 'string' || !hostname.trim()) {
+    return {
+      isValid: false,
+      code: 'INVALID_HOSTNAME',
+      error: 'Hostname must be a non-empty string'
+    };
+  }
+
+  let cleanHost = hostname.trim();
+  if (cleanHost.startsWith('[') && cleanHost.endsWith(']')) {
+    cleanHost = cleanHost.slice(1, -1);
+  }
+
+  const lowerHost = cleanHost.toLowerCase();
+
+  // 1. Prohibited Cloud Metadata must NEVER be allowed under any circumstance (even when allowLocal is true)
+  const CLOUD_METADATA_HOSTNAMES = ['metadata.google.internal', 'instance-data', 'metadata'];
+  if (CLOUD_METADATA_HOSTNAMES.includes(lowerHost) || PROHIBITED_SPECIFIC_IPS.includes(lowerHost)) {
+    return {
+      isValid: false,
+      code: 'BLOCKED_DESTINATION',
+      error: `Access to prohibited cloud metadata destination '${cleanHost}' is blocked for SSRF protection.`
+    };
+  }
+
+  if (!allowLocal) {
+    // Check prohibited hostname literals
+    if (PROHIBITED_HOSTNAMES.includes(lowerHost)) {
+      return {
+        isValid: false,
+        code: 'BLOCKED_DESTINATION',
+        error: `Access to prohibited hostname '${cleanHost}' is blocked for SSRF protection.`
+      };
+    }
+
+    // Check prohibited domain suffixes
+    for (const suffix of PROHIBITED_DOMAIN_SUFFIXES) {
+      if (lowerHost.endsWith(suffix)) {
+        return {
+          isValid: false,
+          code: 'BLOCKED_DESTINATION',
+          error: `Access to local/internal domain '${cleanHost}' is blocked for SSRF protection.`
+        };
+      }
+    }
+  }
+
+  // 2. If hostname is already an IP literal
+  const literalType = net.isIP(cleanHost);
+  if (literalType !== 0) {
+    if (PROHIBITED_SPECIFIC_IPS.includes(lowerHost)) {
+      return {
+        isValid: false,
+        code: 'BLOCKED_DESTINATION',
+        error: `Target IP '${cleanHost}' is restricted cloud metadata.`
+      };
+    }
+
+    if (!allowLocal) {
+      const check = isRestrictedIp(cleanHost);
+      if (check.isRestricted) {
+        return {
+          isValid: false,
+          code: 'BLOCKED_DESTINATION',
+          error: `Target IP '${cleanHost}' is restricted: ${check.reason}.`
+        };
+      }
+    }
+
+    return {
+      isValid: true,
+      addresses: [{ address: cleanHost, family: literalType }],
+      pinnedIp: cleanHost,
+      pinnedFamily: literalType
+    };
+  }
+
+  // 3. Resolve hostname via DNS and validate every returned IP
+  let resolvedRecords;
+  try {
+    if (typeof options.dnsResolver === 'function') {
+      resolvedRecords = await options.dnsResolver(cleanHost);
+    } else {
+      resolvedRecords = await dns.promises.lookup(cleanHost, { all: true });
+    }
+  } catch (dnsErr) {
+    return {
+      isValid: false,
+      code: 'DNS_RESOLUTION_FAILED',
+      error: `DNS resolution failed for host '${cleanHost}': ${dnsErr.message}`
+    };
+  }
+
+  if (!resolvedRecords || !Array.isArray(resolvedRecords) || resolvedRecords.length === 0) {
+    return {
+      isValid: false,
+      code: 'DNS_RESOLUTION_FAILED',
+      error: `DNS resolution returned no address records for host '${cleanHost}'.`
+    };
+  }
+
+  // Validate resolved addresses
+  for (const record of resolvedRecords) {
+    if (PROHIBITED_SPECIFIC_IPS.includes(record.address.toLowerCase())) {
+      return {
+        isValid: false,
+        code: 'BLOCKED_DESTINATION',
+        error: `Destination IP '${record.address}' resolved from '${cleanHost}' is restricted cloud metadata.`
+      };
+    }
+
+    if (!allowLocal) {
+      const check = isRestrictedIp(record.address);
+      if (check.isRestricted) {
+        return {
+          isValid: false,
+          code: 'BLOCKED_DESTINATION',
+          error: `Destination IP '${record.address}' resolved from '${cleanHost}' is restricted: ${check.reason}.`
+        };
+      }
+    }
+  }
+
+  // Pin connection to the first validated address
+  return {
+    isValid: true,
+    addresses: resolvedRecords,
+    pinnedIp: resolvedRecords[0].address,
+    pinnedFamily: resolvedRecords[0].family
+  };
+}
+
+/**
  * Sanitizes headers by stripping or masking sensitive authorization values
  * @param {Record<string, string>} headers - Input headers dictionary
  * @returns {Record<string, string>} Sanitized headers dictionary
@@ -416,12 +636,16 @@ module.exports = {
   ALLOWED_HTTP_METHODS,
   ALLOWED_PROTOCOLS,
   SENSITIVE_HEADERS,
+  SENSITIVE_RESPONSE_HEADERS,
+  HOP_BY_HOP_HEADERS,
   PROHIBITED_HOSTNAMES,
   PROHIBITED_DOMAIN_SUFFIXES,
   PROHIBITED_SPECIFIC_IPS,
   isPrivateOrReservedIPv4,
   expandIPv6,
   isPrivateOrReservedIPv6,
+  isRestrictedIp,
   validateTargetUrl,
+  resolveAndValidateDestination,
   sanitizeHeaders
 };

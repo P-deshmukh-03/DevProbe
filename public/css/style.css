@@ -1441,6 +1441,34 @@ html, body {
   background-color: var(--bg-card);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.metric-badge.badge-2xx {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--status-success);
+}
+
+.metric-badge.badge-3xx {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: var(--status-info);
+}
+
+.metric-badge.badge-4xx {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--status-warning);
+}
+
+.metric-badge.badge-5xx,
+.metric-badge.badge-error {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--status-error);
+}
+
+.btn.loading {
+  opacity: 0.75;
+  cursor: wait;
+  pointer-events: none;
 }
 
 .metric-value {

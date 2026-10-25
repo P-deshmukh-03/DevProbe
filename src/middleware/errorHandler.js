@@ -74,10 +74,14 @@ function errorHandler(err, req, res, next) {
 
   // 3. Sanitized Server Diagnostics (Never log credentials or sensitive request payloads)
   if (statusCode >= 500) {
-    console.error(`[Server Error] [${req.method} ${req.path}] ${err.name || 'Error'}: ${err.message}`);
-    // Hide internal details from client on 500
-    message = 'An unexpected internal server error occurred';
-    errorCode = 'INTERNAL_ERROR';
+    if (process.env.NODE_ENV !== 'test') {
+      console.error(`[Server Error] [${req.method} ${req.path}] ${err.name || 'Error'}: ${err.message}`);
+    }
+    // Only mask unexpected/unhandled generic errors that are not AppError instances
+    if (!(err instanceof AppError)) {
+      message = 'An unexpected internal server error occurred';
+      errorCode = 'INTERNAL_ERROR';
+    }
   } else {
     // Info logging for client errors (4xx)
     if (process.env.NODE_ENV !== 'test') {

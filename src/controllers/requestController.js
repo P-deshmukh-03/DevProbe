@@ -1,14 +1,14 @@
 /**
  * DevProbe — Request Controller
  *
- * Handles HTTP requests for API request configuration and validation endpoints.
+ * Handles HTTP requests for API request configuration validation and execution endpoints.
  */
 
 const requestService = require('../services/requestService');
 
 /**
  * Handle POST /api/requests/validate
- * Validates and prepares request configuration for Day 5 execution
+ * Validates and prepares request configuration without executing outbound HTTP requests
  */
 function validateRequest(req, res, next) {
   try {
@@ -25,6 +25,25 @@ function validateRequest(req, res, next) {
   }
 }
 
+/**
+ * Handle POST /api/requests/execute
+ * Safely executes the prepared outbound HTTP request and returns upstream response details
+ */
+async function executeRequest(req, res, next) {
+  try {
+    const validatedRequest = req.validatedRequest;
+    const executionResult = await requestService.executeRequest(validatedRequest);
+
+    return res.status(200).json({
+      success: true,
+      data: executionResult
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
-  validateRequest
+  validateRequest,
+  executeRequest
 };

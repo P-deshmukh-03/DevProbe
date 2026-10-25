@@ -2,41 +2,38 @@
 
 DevProbe is a lightweight, full-stack web application designed to help developers test HTTP APIs, inspect responses, organize requests, and generate API documentation.
 
-The project aims to provide a simple, developer-friendly workspace for testing and managing API requests.
+The project provides a simple, developer-friendly workspace for configuring, testing, and managing API requests with enterprise-grade SSRF defense and connection security.
 
 ## 🛠️ Technology Stack
 
 | Technology | Purpose |
 |---|---|
-| HTML5 | Frontend structure |
-| CSS3 | Styling and responsive design |
-| JavaScript | Frontend functionality & backend logic |
+| HTML5 | Frontend workspace structure |
+| CSS3 | Dark-theme styling and responsive workspace layout |
+| JavaScript | Frontend reactivity, state engine & backend server logic |
 | Node.js | Backend JavaScript runtime |
-| Express.js | Backend server, API routes, and middleware |
+| Express.js | Backend server, API routes, and middleware pipeline |
 | MySQL | Database for persistent storage (planned) |
 | Git & GitHub | Version control and collaboration |
 
 ## 📅 Current Development Status
 
-**Day 4 of 16 — Backend Architecture and API Execution Preparation**
+**Day 5 of 16 — Real HTTP Request Execution Engine**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
 - **Day 2**: Modern Postman-inspired dark-mode workspace UI with responsive sidebar, request bar, tabs, and response viewer.
 - **Day 3**: Centralized client-side request state management, parameter parsing, header validation, variable resolution (`{{base_url}}`), and in-memory credential handling.
-- **Day 4**: Layered backend architecture, request validation endpoint (`POST /api/requests/validate`), security configuration & SSRF defense layer, execution limits, centralized error handling, and automated test suite.
+- **Day 4**: Layered backend architecture, preparation-only validation endpoint (`POST /api/requests/validate`), security configuration & initial SSRF defense layer, execution limits, centralized error handling, and automated test suite.
+- **Day 5**: Real outbound HTTP request execution engine (`POST /api/requests/execute`), DNS pre-resolution with comprehensive IP range checking, DNS rebinding protection via socket-level connection pinning, manual redirect loop with destination re-validation and credential stripping, response streaming size limit enforcement (5 MB), monotonic latency measurement, response viewer integration, and complete automated verification suite (80 tests).
 
-The application is currently under active development.
+## ✨ Features
 
-## ✨ Planned Features
-
-The following features will be implemented progressively during development:
-
-- [x] **Frontend Request Workspace** — Interactive workspace UI with request bar, params, headers, body, and auth tabs.
-- [x] **Request State & Config** — Centralized client request state and live URL preview.
-- [x] **Backend Architecture & Validation** — Clean layered backend with robust request configuration validation and SSRF guards.
-- [ ] **Outbound API Request Engine** — Safe dispatching of HTTP requests and live response capture (Day 5).
-- [ ] **Response Inspector** — Inspect response body, status code, headers, and latency metrics.
+- [x] **Frontend Request Workspace** — Interactive workspace UI with request bar, query params, headers, body, and auth panels.
+- [x] **Request State & Config Engine** — Centralized client request state and live URL preview with environment variable resolution.
+- [x] **Preparation Validation Endpoint** — Server-side syntax and SSRF verification without outbound dispatch (`POST /api/requests/validate`).
+- [x] **Real Outbound Execution Engine** — Secure HTTP/HTTPS dispatching with DNS pinning, manual redirects, and response capture (`POST /api/requests/execute`).
+- [x] **Live Response Inspector** — Inspect upstream status, latency (ms), payload size, headers table, raw/pretty JSON body, and cookie security policies.
 - [ ] **Request Collections & History** — Save and organize requests into persistent collections (Day 9).
 - [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
 - [ ] **Automated API Testing** — Assert status codes, response times, and JSON schema.
@@ -51,26 +48,27 @@ DevProbe/
 ├── public/
 │   ├── index.html                  # DevProbe workspace HTML interface
 │   ├── css/
-│   │   └── style.css               # Dark-theme CSS design system
+│   │   └── style.css               # Dark-theme CSS design system & response viewer styles
 │   └── js/
-│       └── app.js                  # Frontend state management & UI synchronization
+│       └── app.js                  # Frontend state management, Send button dispatch, & response renderer
 │
 ├── src/
 │   ├── app.js                      # Express application entry point & middleware pipeline
 │   ├── config/
-│   │   └── security.js             # Security policies, SSRF defenses, and execution limits
+│   │   └── security.js             # Security policies, SSRF defenses, DNS validation, & execution limits
 │   ├── controllers/
-│   │   └── requestController.js    # Request endpoint controller
+│   │   └── requestController.js    # Request controller (validate & execute endpoints)
 │   ├── middleware/
 │   │   ├── errorHandler.js         # Centralized error handler and 404 handler
 │   │   └── validateRequest.js      # Request payload validation middleware
 │   ├── routes/
 │   │   └── requestRoutes.js        # Request configuration route definitions
 │   └── services/
-│       └── requestService.js       # Request normalization & preparation service
+│       └── requestService.js       # Real execution engine, DNS pinning, & normalization service
 │
-├── test-day3.js                    # Day 3 automated verification test suite
-├── test-day4.js                    # Day 4 automated verification test suite (Tests A-M)
+├── test-day3.js                    # Day 3 automated verification test suite (34 tests)
+├── test-day4.js                    # Day 4 automated verification test suite (67 tests, Tests A-M)
+├── test-day5.js                    # Day 5 automated verification test suite (80 tests, Tests A-R)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -81,38 +79,70 @@ DevProbe/
 
 ## 🏗️ Backend Architecture
 
-DevProbe backend adheres to standard separation of concerns:
+DevProbe adheres to a structured, layered architecture:
 
-- **`src/app.js`**: Bootstraps the Express application, configures body-parsers with payload limits (`1mb`), serves public assets, mounts API routes, registers the 404 handler for unknown routes, and registers the centralized error-handling middleware. Ensures servers only bind when run directly (`require.main === module`).
-- **`src/config/security.js`**: Contains execution limits (timeouts, payload sizes, redirects), permitted HTTP methods/protocols, sensitive header classifications, and SSRF defense logic (inspects hostnames, IPv4 ranges, IPv6 representations, IPv4-mapped IPv6, and cloud metadata addresses).
-- **`src/middleware/validateRequest.js`**: Validates incoming request payloads for `POST /api/requests/validate`. Rejects unsupported HTTP methods, invalid URLs, non-HTTP protocols, embedded credentials, restricted destinations, malformed RFC 7230 headers, and oversized payloads.
-- **`src/middleware/errorHandler.js`**: Intercepts JSON syntax errors, payload size limits (413), validation errors (400), unknown routes (404), and internal server errors (500). Guarantees consistent JSON error structures and prevents leakage of internal stack traces, filesystem paths, or secrets.
-- **`src/services/requestService.js`**: Normalizes request configurations and prepares execution metadata for Day 5 without dispatching network calls. Redacts sensitive authentication tokens and headers.
-- **`src/controllers/requestController.js`**: Reads validated request descriptors, calls the normalization service, and formats HTTP 200 responses.
+- **`src/app.js`**: Bootstraps the Express application, configures body-parsers with payload limits (`1mb`), serves public assets, mounts API routes, registers the 404 handler, and registers centralized error handling.
+- **`src/config/security.js`**: Defines execution limits (timeouts, payload sizes, redirects), permitted methods/protocols, sensitive header classifications, hop-by-hop header lists, and SSRF defense logic (inspects hostnames, IPv4 ranges, IPv6 representations, IPv4-mapped IPv6, and cloud metadata addresses).
+- **`src/middleware/validateRequest.js`**: Validates incoming request payloads for both `/validate` and `/execute`. Rejects unsupported methods, malformed URLs, non-HTTP protocols, embedded credentials, restricted destinations, invalid RFC 7230 headers, and oversized payloads.
+- **`src/middleware/errorHandler.js`**: Intercepts JSON syntax errors, payload size limits (413), validation errors (400), unknown routes (404), and upstream network errors. Guarantees consistent JSON error structures and prevents leakage of internal stack traces, filesystem paths, or secrets.
+- **`src/services/requestService.js`**: Implements the real outbound HTTP/HTTPS execution engine with DNS pre-resolution, socket-level connection pinning, manual redirect loop with cross-origin credential stripping, streaming response size caps, and monotonic latency measurement. Also provides the preparation-only normalization service for `/validate`.
+- **`src/controllers/requestController.js`**: Handles incoming API requests for validation and execution, delegating to `requestService` and returning structured responses.
 
 ## 🔒 Security Architecture & SSRF Defenses
 
-DevProbe is an API testing platform designed to execute requests specified by developers. Consequently, target URL handling is high-risk.
+DevProbe executes developer-configured HTTP requests against external APIs. Outbound request engines represent a high-risk attack surface if not properly defended.
 
-### Current Defenses (Day 4 Configuration Validation)
-- **Protocol Enforcement**: Strictly allows `http:` and `https:`. Rejects `file:`, `ftp:`, `javascript:`, `data:`, etc.
-- **Embedded Credentials Block**: Rejects URLs containing `user:password@host` to prevent credential smuggling.
-- **Hostname Restrictions**: Disallows `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.lan`, and `*.home.arpa`.
-- **Cloud Metadata Defense**: Blocks access to cloud instance metadata services (e.g., `169.254.169.254`, `100.100.100.200`, `metadata.google.internal`, `instance-data`).
-- **Private & Reserved IP Ranges**: Blocks loopback (`127.0.0.0/8`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local (`169.254.0.0/16`), multicast (`224.0.0.0/4`), and reserved addresses (`240.0.0.0/4`).
-- **IPv6 and Alternate Encodings**: Handles standard IPv6, expanded words, IPv6 loopback (`::1`), IPv6 private/unique local (`fc00::/7`), and IPv4-mapped IPv6 formats (`::ffff:127.0.0.1`, `::ffff:7f00:1`).
-- **Zero Credential Exposure**: Authorization headers, cookies, and tokens are scrubbed and replaced with `[REDACTED]` in preparation responses and are never logged to console or persisted.
+### Comprehensive Outbound Security Strategy
 
-> [!WARNING]
-> **SSRF Protection Notice for Outbound Execution (Day 5)**:
-> Server-side URL validation at configuration time is only the first line of defense. Hostname validation alone is **INSUFFICIENT** to prevent DNS rebinding attacks (where a public hostname resolves to a public IP during validation, but resolves to a private IP at connection time).
->
-> Prior to enabling real outbound requests in Day 5, the execution engine will implement:
-> 1. Real-time DNS pre-resolution immediately prior to socket connection.
-> 2. IP address verification against private/restricted ranges.
-> 3. Connection pinning directly to the verified IP address.
-> 4. Mandatory re-validation of each redirect target.
-> 5. Hard socket timeouts and response stream size caps.
+1. **Strict Protocol Enforcement**:
+   - Only `http:` and `https:` schemes are accepted.
+   - All other protocols (`file:`, `ftp:`, `gopher:`, `data:`, `javascript:`) are rejected immediately.
+2. **Embedded Credentials Prohibited**:
+   - URLs containing embedded credentials (e.g., `https://user:pass@host`) are rejected to prevent credential smuggling.
+3. **Pre-Connection DNS Resolution & SSRF Address Validation**:
+   - Hostnames are resolved using `dns.promises.lookup(hostname, { all: true })` prior to establishing any network connection.
+   - **All** resolved addresses (IPv4 and IPv6) are validated. If **any** returned IP address falls within a private, loopback, link-local, multicast, or reserved range, the destination is rejected before socket connection.
+   - Prohibited destinations include:
+     - Loopback: `127.0.0.0/8`, `::1`
+     - Private networks: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`
+     - Link-local: `169.254.0.0/16`, `fe80::/10`
+     - Multicast: `224.0.0.0/4`, `ff00::/8`
+     - Reserved & unspecified: `0.0.0.0/8`, `240.0.0.0/4`, `::`
+     - Shared address space (CGNAT): `100.64.0.0/10`
+     - Documentation prefixes: `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`
+     - Prohibited hostnames: `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.lan`, `*.home.arpa`
+     - Cloud metadata endpoints: `169.254.169.254`, `100.100.100.200`, `metadata.google.internal`, `instance-data`
+4. **DNS Rebinding Defense (Connection Pinning)**:
+   - Hostname validation alone is vulnerable to Time-of-Check to Time-of-Use (TOCTOU) DNS rebinding attacks, where a hostname resolves to a public IP during verification but switches to a loopback/private IP during socket connection.
+   - DevProbe eliminates this vulnerability by passing a custom `lookup` function into `http.request` / `https.request`. The socket establishes its connection directly to the specific IP address that passed SSRF validation, preventing secondary DNS resolution.
+5. **SNI and TLS Hostname Verification Preservation**:
+   - Even though the connection is pinned to a validated IP, `options.servername` and `options.hostname` retain the original target domain name.
+   - TLS Server Name Indication (SNI) correctly passes the hostname during TLS handshakes, and Node's certificate verification verifies that the upstream certificate matches the requested domain.
+6. **Controlled Manual Redirects**:
+   - Automatic client redirects are disabled. Redirects (`301`, `302`, `303`, `307`, `308`) are processed manually in an execution loop.
+   - Every redirect target URL is parsed and re-validated against the full SSRF policy and DNS resolution checks.
+   - Redirect count is capped at 5 by default (`TOO_MANY_REDIRECTS`).
+   - If redirecting across origins, sensitive authentication headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped to prevent credential leakage.
+7. **Streaming Response Size Cap**:
+   - Enforces a hard 5 MB limit (`5,242,880 bytes`) while streaming incoming response chunks (`res.on('data')`), aborting the connection immediately if the limit is exceeded (`RESPONSE_TOO_LARGE`).
+8. **Request & Connection Timeouts**:
+   - Monotonic timeout timers (default 10 seconds, maximum 30 seconds) destroy the request if the remote server fails to respond (`REQUEST_TIMEOUT`).
+9. **Credential Scrubbing**:
+   - Authentication tokens, passwords, and sensitive cookies are never logged to console, never stored in URLs or browser storage, and filtered from response metadata (`Set-Cookie` filtered).
+
+## ⚙️ Request & Response Limits
+
+| Setting | Default Value | Description |
+|---|---|---|
+| Request Timeout | `10,000 ms` (10s) | Maximum roundtrip duration before aborting (`504 Gateway Timeout`) |
+| Max Request Timeout | `30,000 ms` (30s) | Hard ceiling for custom timeout configurations |
+| Max Response Size | `5 MB` (`5,242,880 B`) | Hard streaming limit for response body payloads (`413 Payload Too Large`) |
+| Max Request Body | `1 MB` (`1,048,576 B`) | Incoming client payload limit |
+| Max Redirects | `5` | Maximum number of redirect hops followed before aborting (`502 Bad Gateway`) |
+
+### GET & DELETE Request Body Policy
+
+In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined semantics and may be rejected by some intermediaries. DevProbe preserves and sends user-configured bodies on GET and DELETE requests if explicitly provided, computing `Content-Length` and writing the payload to the wire to support custom or legacy APIs that require request bodies on these methods.
 
 ## 🌐 API Endpoints
 
@@ -127,97 +157,121 @@ DevProbe is an API testing platform designed to execute requests specified by de
   }
   ```
 
-### 2. Request Configuration Validation
+### 2. Request Configuration Validation (Preparation-Only)
 - **Route**: `POST /api/requests/validate`
-- **Description**: Validates and prepares an HTTP request configuration for Day 5 execution. **Does NOT send an outbound HTTP request.**
+- **Description**: Validates request parameters and produces a normalized execution plan. **Does not perform any outbound network calls.**
+- **Status**: `200 OK`
+
+### 3. Real HTTP Request Execution
+- **Route**: `POST /api/requests/execute`
+- **Description**: Safely executes an outbound HTTP/HTTPS request against the target API and returns real status, headers, body, and latency metrics.
 - **Request Headers**: `Content-Type: application/json`
 - **Example Request Body**:
   ```json
   {
-    "method": "GET",
-    "url": "https://jsonplaceholder.typicode.com/users/1",
+    "method": "POST",
+    "url": "https://jsonplaceholder.typicode.com/posts",
     "headers": {
       "Accept": "application/json",
-      "Authorization": "Bearer sample-token"
+      "Content-Type": "application/json"
     },
-    "body": null
+    "body": "{\"title\":\"Hello DevProbe\",\"body\":\"Testing Day 5\",\"userId\":1}",
+    "auth": {
+      "type": "bearer",
+      "bearerToken": "sample-auth-token"
+    }
   }
   ```
 - **Example Success Response (`200 OK`)**:
   ```json
   {
     "success": true,
-    "message": "Request configuration validated successfully",
     "data": {
-      "method": "GET",
-      "url": "https://jsonplaceholder.typicode.com/users/1",
-      "readyForExecution": true,
+      "status": 201,
+      "statusText": "Created",
+      "timeMs": 142,
+      "sizeBytes": 65,
       "headers": {
-        "Accept": "application/json",
-        "Authorization": "[REDACTED]"
+        "content-type": "application/json; charset=utf-8",
+        "x-powered-by": "Express"
       },
       "body": {
-        "present": false,
-        "sizeBytes": 0,
-        "mediaType": null
-      },
-      "settings": {
-        "timeoutMs": 10000,
-        "maxRedirects": 5,
-        "maxResponseSizeBytes": 5242880
-      },
-      "executionStatus": "NOT_EXECUTED",
-      "message": "Configuration validated and prepared for Day 5 execution engine. No outbound HTTP requests were dispatched."
+        "title": "Hello DevProbe",
+        "body": "Testing Day 5",
+        "userId": 1,
+        "id": 101
+      }
     }
   }
   ```
 
-### 3. API Error Status Codes
-- `200 OK`: Request configuration validated and ready for execution.
-- `400 Bad Request`: Malformed JSON, unsupported HTTP method, invalid URL, prohibited target, or invalid header names/values.
-- `413 Payload Too Large`: Request body exceeds maximum allowed size (1 MB).
-- `404 Not Found`: Unknown API endpoint.
-- `500 Internal Server Error`: Unexpected server fault (stack traces and secrets suppressed).
+### 4. Execution Error Response Format
+When destination validation fails or limits are exceeded, a structured error is returned:
+```json
+{
+  "success": false,
+  "message": "Access to prohibited hostname 'localhost' is blocked for SSRF protection.",
+  "error": {
+    "message": "Access to prohibited hostname 'localhost' is blocked for SSRF protection.",
+    "code": "BLOCKED_DESTINATION"
+  }
+}
+```
+
+Common Error Codes:
+- `BLOCKED_DESTINATION` (`400`): SSRF target, private IP, link-local, or cloud metadata destination.
+- `DNS_RESOLUTION_FAILED` (`502`): Domain name could not be resolved.
+- `REQUEST_TIMEOUT` (`504`): Connection or overall request exceeded timeout threshold.
+- `RESPONSE_TOO_LARGE` (`413`): Upstream response exceeded 5 MB streaming limit.
+- `TOO_MANY_REDIRECTS` (`502`): Exceeded maximum redirect limit (5).
+- `CONNECTION_ERROR` (`502`): Connection refused, reset, or broken pipe.
+- `TLS_ERROR` (`502`): TLS handshake failure or invalid certificate.
+
+## 📦 Supported Response Media Types & Known Limitations
+
+### Supported Response Formats
+- **JSON**: Parsed into structured JavaScript objects. The response viewer provides both **Pretty** (formatted indentation) and **Raw** views.
+- **Plain Text / HTML / XML**: Preserved as text strings and rendered safely using `textContent` (preventing script execution or HTML injection in the application).
+- **Empty Responses** (`204 No Content`): Handled safely and displayed with status code without errors.
+- **Binary Data** (`images`, `audio`, `video`, `application/octet-stream`, `PDF`): Safely captured and returned as a descriptive binary metadata object (`{ isBinary: true, contentType, sizeBytes, preview }`). Binary streams are not corrupted by forcing UTF-8 decoding.
+
+### Known Limitations
+- **Cookie Jar / Ambient Cookie Persistence**: For security, DevProbe does not store or replay response cookies between requests.
+- **HTTP/2 & HTTP/3**: Current engine dispatches requests using HTTP/1.1. Native HTTP/2 connection multiplexing is scheduled for a future release.
+- **Client Certificate (mTLS) Authentication**: Mutual TLS authentication is not yet exposed via the workspace UI.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-
 - [Node.js](https://nodejs.org/) (v18+ recommended)
 - [npm](https://www.npmjs.com/)
 - [Git](https://git-scm.com/)
 
-### 1. Clone the Repository
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/P-deshmukh-03/DevProbe.git
 cd DevProbe
-```
-
-### 2. Install Dependencies
-
-```bash
 npm install
 ```
 
-### 3. Configure Environment Variables
+### 2. Configure Environment
 
 Copy `.env.example` to `.env`:
-
 ```bash
 cp .env.example .env
 ```
 
-Default contents:
+Contents:
 ```dotenv
 PORT=3000
 NODE_ENV=development
 DEVPROBE_ALLOW_LOCAL_TARGETS=false
 ```
 
-### 4. Start the Application
+### 3. Start Application
 
-- **Development Mode (with auto-reload)**:
+- **Development Mode**:
   ```bash
   npm run dev
   ```
@@ -226,47 +280,56 @@ DEVPROBE_ALLOW_LOCAL_TARGETS=false
   npm start
   ```
 
-Open your browser at: `http://localhost:3000`
+Open browser at `http://localhost:3000`.
 
-## 🧪 Running Automated Tests
+## 🧪 Automated Testing
 
-DevProbe includes comprehensive automated test suites covering both frontend state logic and backend API validation:
+DevProbe features a multi-tiered test suite with 181 automated tests verifying frontend state, backend validation, SSRF defenses, and real outbound request execution:
 
 ```bash
-# Run both Day 3 and Day 4 test suites
+# Run all test suites (Day 3, Day 4, and Day 5 — 181 total tests)
 npm test
 
-# Run Day 3 frontend state & parameter tests (34 tests)
+# Run Day 3 frontend state & parameter parsing tests (34 tests)
 npm run test:day3
 
-# Run Day 4 backend architecture, SSRF, & validation tests (67 tests, Tests A-M)
+# Run Day 4 backend architecture & SSRF validation tests (67 tests)
 npm run test:day4
+
+# Run Day 5 real HTTP execution & connection security tests (80 tests)
+npm run test:day5
 ```
 
-### Day 4 Test Coverage (Tests A through M)
-- **TEST A**: Health check endpoint (`GET /api/health`).
-- **TEST B**: Valid request configuration preparation (`POST /api/requests/validate`).
-- **TEST C**: Rejection of unsupported HTTP methods (`TRACE`, etc.).
-- **TEST D**: Rejection of malformed URLs.
-- **TEST E**: Rejection of unsupported protocols (`file:`, `ftp:`).
-- **TEST F**: Rejection of embedded credentials (`user:pass@host`).
-- **TEST G**: Rejection of unsafe destinations (localhost, private IPv4/IPv6, metadata IMDS).
-- **TEST H**: Rejection of invalid header names and non-string header values.
-- **TEST I**: Rejection of missing required fields (URL, method).
-- **TEST J**: Controlled 404 response for unknown API routes.
-- **TEST K**: Controlled error handling for malformed JSON and oversized bodies (413).
-- **TEST L**: Complete redaction and non-leakage of bearer tokens, cookies, and passwords.
-- **TEST M**: Verification that zero outbound HTTP requests are dispatched during validation.
+### Day 5 Test Coverage (Tests A through R)
+- **TEST A**: Health endpoint check (`GET /api/health`).
+- **TEST B**: Validation endpoint remains preparation-only with zero network calls.
+- **TEST C**: Real HTTP execution returns actual status, headers, body, and latency.
+- **TEST D**: Upstream non-2xx responses (`404`, `500`) are captured as valid upstream results.
+- **TEST E**: Unsupported HTTP methods (`CONNECT`, etc.) rejected with `UNSUPPORTED_METHOD`.
+- **TEST F**: Invalid URLs, missing schemes, and embedded credentials rejected.
+- **TEST G**: SSRF protection blocks loopback, private IPv4/IPv6, link-local, and cloud IMDS.
+- **TEST H**: DNS resolution containing prohibited addresses rejected (`BLOCKED_DESTINATION`).
+- **TEST I**: DNS rebinding protection pins connection to validated IP address.
+- **TEST J**: Redirects to unsafe or metadata destinations blocked during redirect hops.
+- **TEST K**: Maximum redirect limit (5) enforced with `TOO_MANY_REDIRECTS`.
+- **TEST L**: Configurable request timeouts enforced with `504 REQUEST_TIMEOUT`.
+- **TEST M**: Response streaming limit (5 MB) enforced, safely aborting oversized responses.
+- **TEST N**: Malformed client JSON payloads handled gracefully (`INVALID_JSON`).
+- **TEST O**: Bearer tokens, Basic passwords, and upstream Set-Cookie headers are protected.
+- **TEST P**: Plain-text, empty (204), and binary payloads handled without corruption.
+- **TEST Q**: Frontend Send button and response viewer state synchronization verified.
+- **TEST R**: Regression checks for Day 3 and Day 4 suites pass.
 
 ## 🗺️ Development Roadmap
 
 | Phase | Planned Work | Status |
 |---|---|---|
-| Days 1–2 | Project setup and frontend interface | Completed |
+| Days 1–2 | Project setup and frontend workspace interface | Completed |
 | Days 3–4 | Request state management & backend validation architecture | Completed |
-| Days 5–8 | API execution, response inspection, and database schema | Upcoming |
+| Days 5–6 | Real HTTP execution engine, SSRF defense & response inspector | Completed (Day 5) |
+| Days 7–8 | Database schema and query optimization | Upcoming |
 | Days 9–12 | Collections, saved requests, authentication, and request history | Planned |
-| Days 13–16 | Environment variables, automated tests, documentation, and final verification | Planned |
+| Days 13–16 | Environment variables, automated tests, documentation, and final deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -275,4 +338,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Development** — Day 4 completed. All backend architecture, validation rules, SSRF protections, and automated test suites implemented and verified.
+**In Active Development** — Day 5 complete. Secure HTTP request execution engine implemented with DNS pinning, manual redirect validation, streaming response limits, and frontend response viewer integration. 181 automated tests passing.
