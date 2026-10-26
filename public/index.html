@@ -34,7 +34,7 @@
             </svg>
           </div>
           <span class="brand-title">DevProbe</span>
-          <span class="badge badge-subtle">Day 5: Execution Engine</span>
+          <span class="badge badge-subtle">Day 6: Response Viewer</span>
         </div>
 
         <div class="nav-divider" aria-hidden="true"></div>
@@ -501,11 +501,15 @@
                 </button>
               </nav>
 
-              <!-- Response Summary Metrics (Placeholders) -->
+              <!-- Response Summary Metrics -->
               <div class="response-metrics" aria-label="Response Statistics">
                 <div class="metric-item" title="HTTP Status Code">
                   <span class="metric-label">Status:</span>
                   <span class="metric-badge" id="res-status-badge">—</span>
+                </div>
+                <div class="metric-item" title="Response Content-Type">
+                  <span class="metric-label">Type:</span>
+                  <span class="metric-value font-mono" id="res-type-value">—</span>
                 </div>
                 <div class="metric-item" title="Roundtrip Response Time">
                   <span class="metric-label">Time:</span>
@@ -524,22 +528,32 @@
               <!-- Response Body Panel -->
               <div class="response-panel active" id="panel-res-body" role="tabpanel">
                 <div class="response-toolbar">
-                  <div class="response-format-selector">
-                    <button class="format-btn active" data-fmt="pretty">Pretty</button>
-                    <button class="format-btn" data-fmt="raw">Raw</button>
+                  <div class="response-format-selector" role="group" aria-label="Response format selector">
+                    <button class="format-btn active" data-fmt="pretty" aria-label="Pretty format" title="Format JSON with syntax highlighting">Pretty</button>
+                    <button class="format-btn" data-fmt="raw" aria-label="Raw format" title="Show raw unformatted response">Raw</button>
                   </div>
                   <div class="response-actions">
-                    <button id="btn-copy-response" class="btn-xs btn-ghost" title="Copy response content">
+                    <button id="btn-copy-response" class="btn-xs btn-ghost" title="Copy response body" aria-label="Copy response body">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
                       </svg>
-                      Copy
+                      <span>Copy Body</span>
+                    </button>
+                    <button id="btn-copy-headers" class="btn-xs btn-ghost" title="Copy response headers" aria-label="Copy response headers">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                      </svg>
+                      <span>Copy Headers</span>
                     </button>
                   </div>
                 </div>
 
-                <!-- Empty State View (Honest: explains execution is coming in Day 5) -->
+                <!-- State Feedback Banner -->
+                <div id="response-state-banner" class="response-state-banner hidden" role="status"></div>
+
+                <!-- Empty State View -->
                 <div class="response-empty-state" id="response-empty-state">
                   <div class="empty-state-icon">
                     <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -558,7 +572,7 @@
                       <line x1="12" y1="16" x2="12" y2="12"></line>
                       <line x1="12" y1="8" x2="12.01" y2="8"></line>
                     </svg>
-                    <span><strong>Execution Engine:</strong> Real HTTP request execution with SSRF protection and DNS pinning is active.</span>
+                    <span><strong>Response Viewer:</strong> Pretty/Raw JSON syntax highlighting, safe text rendering, metadata metrics, and copy actions active.</span>
                   </div>
                 </div>
 
@@ -597,7 +611,7 @@
         <span class="status-separator">/</span>
         <span class="status-indicator">
           <span class="status-dot"></span>
-          <span>HTTP Execution Engine Active (Day 5)</span>
+          <span>Response Viewer &amp; HTTP Execution Engine Active (Day 6)</span>
         </span>
       </div>
 

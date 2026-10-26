@@ -233,6 +233,10 @@ function dispatchSingleRequest({
         }
 
         const parsedBody = parseResponseBody(rawBuffer, res.headers['content-type']);
+        const isBinary = typeof parsedBody === 'object' && parsedBody !== null && parsedBody.isBinary;
+        const rawText = isBinary
+          ? (parsedBody.preview || '[Binary Content]')
+          : rawBuffer.toString('utf8');
 
         resolve({
           status: res.statusCode || 200,
@@ -240,7 +244,8 @@ function dispatchSingleRequest({
           timeMs,
           sizeBytes,
           headers: safeHeaders,
-          body: parsedBody
+          body: parsedBody,
+          rawText
         });
       });
 

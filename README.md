@@ -287,7 +287,7 @@ Open browser at `http://localhost:3000`.
 DevProbe features a multi-tiered test suite with 181 automated tests verifying frontend state, backend validation, SSRF defenses, and real outbound request execution:
 
 ```bash
-# Run all test suites (Day 3, Day 4, and Day 5 — 181 total tests)
+# Run all test suites (Day 3, Day 4, Day 5, and Day 6 — 277 total tests)
 npm test
 
 # Run Day 3 frontend state & parameter parsing tests (34 tests)
@@ -298,27 +298,25 @@ npm run test:day4
 
 # Run Day 5 real HTTP execution & connection security tests (80 tests)
 npm run test:day5
+
+# Run Day 6 response viewer improvements & state tests (96 tests)
+npm run test:day6
 ```
 
-### Day 5 Test Coverage (Tests A through R)
-- **TEST A**: Health endpoint check (`GET /api/health`).
-- **TEST B**: Validation endpoint remains preparation-only with zero network calls.
-- **TEST C**: Real HTTP execution returns actual status, headers, body, and latency.
-- **TEST D**: Upstream non-2xx responses (`404`, `500`) are captured as valid upstream results.
-- **TEST E**: Unsupported HTTP methods (`CONNECT`, etc.) rejected with `UNSUPPORTED_METHOD`.
-- **TEST F**: Invalid URLs, missing schemes, and embedded credentials rejected.
-- **TEST G**: SSRF protection blocks loopback, private IPv4/IPv6, link-local, and cloud IMDS.
-- **TEST H**: DNS resolution containing prohibited addresses rejected (`BLOCKED_DESTINATION`).
-- **TEST I**: DNS rebinding protection pins connection to validated IP address.
-- **TEST J**: Redirects to unsafe or metadata destinations blocked during redirect hops.
-- **TEST K**: Maximum redirect limit (5) enforced with `TOO_MANY_REDIRECTS`.
-- **TEST L**: Configurable request timeouts enforced with `504 REQUEST_TIMEOUT`.
-- **TEST M**: Response streaming limit (5 MB) enforced, safely aborting oversized responses.
-- **TEST N**: Malformed client JSON payloads handled gracefully (`INVALID_JSON`).
-- **TEST O**: Bearer tokens, Basic passwords, and upstream Set-Cookie headers are protected.
-- **TEST P**: Plain-text, empty (204), and binary payloads handled without corruption.
-- **TEST Q**: Frontend Send button and response viewer state synchronization verified.
-- **TEST R**: Regression checks for Day 3 and Day 4 suites pass.
+### Day 6 Test Coverage (Tests A through M — 96 Tests)
+- **TEST A**: Valid JSON formatting with 2-space indentation and full syntax highlighting tokenization (`json-key`, `json-string`, `json-number`, `json-boolean`, `json-null`, `json-punct`).
+- **TEST B**: Safe rendering and HTML-escaping to prevent XSS when response bodies contain `<script>`, `<img>`, or HTML tags.
+- **TEST C**: Graceful fallback when parsing malformed JSON payloads, displaying original raw text without crashing and setting `isMalformedJson: true`.
+- **TEST D**: Plain-text response display with correct status, time, size, and Content-Type metrics.
+- **TEST E**: Empty response handling for HTTP 204 No Content and 0-byte responses (`isEmpty: true`).
+- **TEST F**: Binary and unsupported media handling (`isBinary: true`), safe textual representation, and UI card preview suppression.
+- **TEST G**: Upstream non-2xx HTTP responses (`404 Not Found`, `500 Internal Server Error`) preserved as valid execution results rather than transport errors.
+- **TEST H**: Network error and request timeout states with status clearing, warning banner, and troubleshooting notes.
+- **TEST I**: Response metadata extraction (case-insensitive Content-Type) and consecutive request state resetting (`resetResponseViewer`).
+- **TEST J**: Copy Body logic with pretty/raw format selection, empty body detection, and Clipboard API fallback.
+- **TEST K**: Copy Headers formatting into RFC-compliant key-value text lines.
+- **TEST L**: End-to-end integration with local DevProbe execution engine and mock upstream server (`rawText` return contract).
+- **TEST M**: Regression checks ensuring Day 3, Day 4, and Day 5 exports and request state structures remain intact.
 
 ## 🗺️ Development Roadmap
 
@@ -326,7 +324,7 @@ npm run test:day5
 |---|---|---|
 | Days 1–2 | Project setup and frontend workspace interface | Completed |
 | Days 3–4 | Request state management & backend validation architecture | Completed |
-| Days 5–6 | Real HTTP execution engine, SSRF defense & response inspector | Completed (Day 5) |
+| Days 5–6 | Real HTTP execution engine, SSRF defense & response inspector improvements | Completed |
 | Days 7–8 | Database schema and query optimization | Upcoming |
 | Days 9–12 | Collections, saved requests, authentication, and request history | Planned |
 | Days 13–16 | Environment variables, automated tests, documentation, and final deployment | Planned |
@@ -338,4 +336,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 5 complete. Secure HTTP request execution engine implemented with DNS pinning, manual redirect validation, streaming response limits, and frontend response viewer integration. 181 automated tests passing.
+**In Active Development** — Day 6 complete. Response Viewer Improvements implemented with lightweight JSON syntax highlighting, safe XSS-free DOM rendering, Copy Body and Copy Headers with Clipboard API fallback, 7 distinct response states (JSON, text, 204/empty, malformed JSON, non-2xx, network/timeout, binary card), live metadata metrics, and comprehensive regression test suites. 277 automated tests passing.
