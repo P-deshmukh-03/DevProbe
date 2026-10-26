@@ -694,6 +694,16 @@ html, body {
   padding: 4px;
   gap: 6px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.request-bar.has-error {
+  border-color: var(--status-error);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+}
+
+.request-url-input.input-error {
+  color: #fca5a5;
 }
 
 /* --- URL Preview Bar (Day 3 Feature) --- */
@@ -1627,6 +1637,18 @@ html, body {
   background-color: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.3);
   color: #fcd34d;
+}
+
+.response-state-banner.banner-error {
+  background-color: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.response-state-banner.banner-blocked {
+  background-color: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
 }
 
 .response-state-banner.banner-info {

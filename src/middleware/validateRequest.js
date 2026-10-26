@@ -31,8 +31,8 @@ function validateRequestPayload(req, res, next) {
   }
 
   // 2. Validate HTTP Method
-  if (!payload.method || typeof payload.method !== 'string') {
-    return next(new AppError('Field \'method\' is required and must be a string', 400, 'MISSING_METHOD'));
+  if (!payload.method || typeof payload.method !== 'string' || !payload.method.trim()) {
+    return next(new AppError('Field \'method\' is required and must be a string', 400, 'MISSING_METHOD', null, 'method'));
   }
 
   const normalizedMethod = payload.method.trim().toUpperCase();
@@ -40,25 +40,27 @@ function validateRequestPayload(req, res, next) {
     return next(new AppError(
       `Unsupported HTTP method '${payload.method}'. Supported methods: ${ALLOWED_HTTP_METHODS.join(', ')}`,
       400,
-      'UNSUPPORTED_METHOD'
+      'UNSUPPORTED_METHOD',
+      null,
+      'method'
     ));
   }
 
   // 3. Validate Target URL
   if (!payload.url || typeof payload.url !== 'string' || !payload.url.trim()) {
-    return next(new AppError('Field \'url\' is required and must be a non-empty string', 400, 'MISSING_URL'));
+    return next(new AppError('Field \'url\' is required and must be a non-empty string', 400, 'MISSING_URL', null, 'url'));
   }
 
   const urlValidation = validateTargetUrl(payload.url);
   if (!urlValidation.isValid) {
-    return next(new AppError(urlValidation.error, 400, 'INVALID_URL'));
+    return next(new AppError(urlValidation.error, 400, 'INVALID_URL', null, 'url'));
   }
 
   // 4. Validate Headers (if provided)
   let validatedHeaders = {};
   if (payload.headers !== undefined && payload.headers !== null) {
     if (typeof payload.headers !== 'object' || Array.isArray(payload.headers)) {
-      return next(new AppError('Field \'headers\' must be a key-value object', 400, 'INVALID_HEADERS'));
+      return next(new AppError('Field \'headers\' must be a key-value object', 400, 'INVALID_HEADERS', null, 'headers'));
     }
 
     for (const [headerName, headerVal] of Object.entries(payload.headers)) {
@@ -67,7 +69,9 @@ function validateRequestPayload(req, res, next) {
         return next(new AppError(
           `Invalid HTTP header name '${headerName}'. Header names must follow RFC 7230 token specifications.`,
           400,
-          'INVALID_HEADER_NAME'
+          'INVALID_HEADER_NAME',
+          null,
+          'headers'
         ));
       }
 
@@ -76,7 +80,9 @@ function validateRequestPayload(req, res, next) {
         return next(new AppError(
           `Invalid value for header '${headerName}'. Header values must be strings.`,
           400,
-          'INVALID_HEADER_VALUE'
+          'INVALID_HEADER_VALUE',
+          null,
+          'headers'
         ));
       }
 
@@ -93,22 +99,24 @@ function validateRequestPayload(req, res, next) {
     bodyPresent = true;
     if (typeof payload.body === 'string') {
       bodySizeBytes = Buffer.byteLength(payload.body, 'utf8');
-    } else if (typeof payload.body === 'object') {
+    } else if (typeof payload.body === 'object' || typeof payload.body === 'number' || typeof payload.body === 'boolean') {
       try {
         const serialized = JSON.stringify(payload.body);
         bodySizeBytes = Buffer.byteLength(serialized, 'utf8');
       } catch (err) {
-        return next(new AppError('Failed to serialize request body: circular or invalid structure', 400, 'INVALID_BODY'));
+        return next(new AppError('Failed to serialize request body: circular or invalid structure', 400, 'INVALID_BODY', null, 'body'));
       }
     } else {
-      return next(new AppError('Request body must be a string, JSON object, or null', 400, 'INVALID_BODY'));
+      return next(new AppError('Request body must be a string, JSON object, primitive, or null', 400, 'INVALID_BODY', null, 'body'));
     }
 
     if (bodySizeBytes > EXECUTION_LIMITS.MAX_REQUEST_BODY_SIZE_BYTES) {
       return next(new AppError(
         `Request body size (${bodySizeBytes} bytes) exceeds maximum permitted limit of ${EXECUTION_LIMITS.MAX_REQUEST_BODY_SIZE_BYTES} bytes (1 MB)`,
         413,
-        'PAYLOAD_TOO_LARGE'
+        'PAYLOAD_TOO_LARGE',
+        null,
+        'body'
       ));
     }
 
@@ -122,7 +130,27 @@ function validateRequestPayload(req, res, next) {
   // 6. Validate Auth (if provided)
   if (payload.auth !== undefined && payload.auth !== null) {
     if (typeof payload.auth !== 'object' || Array.isArray(payload.auth)) {
-      return next(new AppError('Field \'auth\' must be a configuration object', 400, 'INVALID_AUTH'));
+      return next(new AppError('Field \'auth\' must be a configuration object', 400, 'INVALID_AUTH', null, 'auth'));
+    }
+    if (payload.auth.type !== undefined && payload.auth.type !== null) {
+      if (typeof payload.auth.type !== 'string' || !['none', 'bearer', 'basic'].includes(payload.auth.type.trim().toLowerCase())) {
+        return next(new AppError(
+          `Unsupported or invalid auth type '${payload.auth.type}'. Supported types: none, bearer, basic`,
+          400,
+          'INVALID_AUTH',
+          null,
+          'auth'
+        ));
+      }
+    }
+    if (payload.auth.bearerToken !== undefined && payload.auth.bearerToken !== null && typeof payload.auth.bearerToken !== 'string') {
+      return next(new AppError('Auth bearerToken must be a string', 400, 'INVALID_AUTH', null, 'auth'));
+    }
+    if (payload.auth.basicUsername !== undefined && payload.auth.basicUsername !== null && typeof payload.auth.basicUsername !== 'string') {
+      return next(new AppError('Auth basicUsername must be a string', 400, 'INVALID_AUTH', null, 'auth'));
+    }
+    if (payload.auth.basicPassword !== undefined && payload.auth.basicPassword !== null && typeof payload.auth.basicPassword !== 'string') {
+      return next(new AppError('Auth basicPassword must be a string', 400, 'INVALID_AUTH', null, 'auth'));
     }
   }
 
@@ -130,7 +158,22 @@ function validateRequestPayload(req, res, next) {
   let validatedSettings = {};
   if (payload.settings !== undefined && payload.settings !== null) {
     if (typeof payload.settings !== 'object' || Array.isArray(payload.settings)) {
-      return next(new AppError('Field \'settings\' must be a configuration object', 400, 'INVALID_SETTINGS'));
+      return next(new AppError('Field \'settings\' must be a configuration object', 400, 'INVALID_SETTINGS', null, 'settings'));
+    }
+    if (payload.settings.timeoutMs !== undefined && payload.settings.timeoutMs !== null) {
+      if (typeof payload.settings.timeoutMs !== 'number' || isNaN(payload.settings.timeoutMs) || payload.settings.timeoutMs < 0) {
+        return next(new AppError('Settings timeoutMs must be a non-negative number', 400, 'INVALID_SETTINGS', null, 'settings'));
+      }
+    }
+    if (payload.settings.maxRedirects !== undefined && payload.settings.maxRedirects !== null) {
+      if (typeof payload.settings.maxRedirects !== 'number' || isNaN(payload.settings.maxRedirects) || payload.settings.maxRedirects < 0) {
+        return next(new AppError('Settings maxRedirects must be a non-negative number', 400, 'INVALID_SETTINGS', null, 'settings'));
+      }
+    }
+    if (payload.settings.maxResponseSizeBytes !== undefined && payload.settings.maxResponseSizeBytes !== null) {
+      if (typeof payload.settings.maxResponseSizeBytes !== 'number' || isNaN(payload.settings.maxResponseSizeBytes) || payload.settings.maxResponseSizeBytes <= 0) {
+        return next(new AppError('Settings maxResponseSizeBytes must be a positive number', 400, 'INVALID_SETTINGS', null, 'settings'));
+      }
     }
     validatedSettings = payload.settings;
   }

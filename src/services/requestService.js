@@ -261,6 +261,7 @@ function dispatchSingleRequest({
     timeoutTimer = setTimeout(() => {
       if (finished) return;
       finished = true;
+      cleanup();
       req.destroy();
       reject(new AppError(`Request timed out after ${timeoutMs}ms`, 504, 'REQUEST_TIMEOUT'));
     }, timeoutMs);
@@ -269,6 +270,7 @@ function dispatchSingleRequest({
     req.setTimeout(timeoutMs, () => {
       if (finished) return;
       finished = true;
+      cleanup();
       req.destroy();
       reject(new AppError(`Connection socket timed out after ${timeoutMs}ms`, 504, 'REQUEST_TIMEOUT'));
     });
@@ -285,11 +287,20 @@ function dispatchSingleRequest({
       if (err.code === 'ECONNREFUSED') {
         return reject(new AppError(`Connection refused by ${parsedUrl.hostname}`, 502, 'CONNECTION_ERROR'));
       }
+      if (err.code === 'ECONNRESET') {
+        return reject(new AppError(`Connection reset by peer (${parsedUrl.hostname})`, 502, 'CONNECTION_ERROR'));
+      }
       if (err.code === 'ETIMEDOUT' || err.code === 'ESOCKETTIMEDOUT') {
         return reject(new AppError(`Connection timed out: ${err.message}`, 504, 'REQUEST_TIMEOUT'));
       }
       if (err.code === 'CERT_HAS_EXPIRED' || err.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || err.code?.startsWith('ERR_TLS_')) {
         return reject(new AppError(`TLS verification failed: ${err.message}`, 502, 'TLS_ERROR'));
+      }
+      if (err.code === 'ENOTFOUND' || err.code === 'EAI_AGAIN') {
+        return reject(new AppError(`DNS lookup failed for ${parsedUrl.hostname}`, 502, 'DNS_RESOLUTION_FAILED'));
+      }
+      if (err.code === 'EHOSTUNREACH' || err.code === 'ENETUNREACH') {
+        return reject(new AppError(`Host unreachable (${parsedUrl.hostname})`, 502, 'CONNECTION_ERROR'));
       }
 
       return reject(new AppError(`Outbound request failed: ${err.message}`, 502, 'CONNECTION_ERROR'));
@@ -420,7 +431,7 @@ async function executeRequest(validatedRequest, executionOptions = {}) {
   if (body !== undefined && body !== null && body !== '') {
     if (typeof body === 'string') {
       preparedBody = body;
-    } else if (typeof body === 'object') {
+    } else if (typeof body === 'object' || typeof body === 'number' || typeof body === 'boolean') {
       try {
         preparedBody = JSON.stringify(body);
         if (!findHeaderKey(preparedHeaders, 'content-type')) {

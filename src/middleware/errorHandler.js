@@ -13,12 +13,13 @@
  * Custom application error class
  */
 class AppError extends Error {
-  constructor(message, statusCode = 400, code = 'BAD_REQUEST', details = null) {
+  constructor(message, statusCode = 400, code = 'BAD_REQUEST', details = null, field = null) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
     this.code = code;
     this.details = details;
+    this.field = field;
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -57,9 +58,10 @@ function errorHandler(err, req, res, next) {
   let errorCode = err.code || 'INTERNAL_ERROR';
   let message = err.message || 'An unexpected internal server error occurred';
   let details = err.details || null;
+  let field = err.field || null;
 
   // 1. JSON parse errors from body-parser
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+  if ((err instanceof SyntaxError && err.status === 400 && 'body' in err) || err.type === 'entity.parse.failed') {
     statusCode = 400;
     errorCode = 'INVALID_JSON';
     message = 'Malformed JSON in request body. Please verify syntax.';
@@ -96,6 +98,7 @@ function errorHandler(err, req, res, next) {
     error: {
       message,
       code: errorCode,
+      ...(field ? { field } : {}),
       ...(details ? { details } : {})
     }
   });

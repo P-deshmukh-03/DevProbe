@@ -1098,6 +1098,7 @@ function initRequestBar() {
   if (urlInput) {
     urlInput.addEventListener('input', () => {
       activeRequest.url = urlInput.value;
+      setUrlInputError(false);
       updateUrlPreview();
     });
   }
@@ -1386,8 +1387,93 @@ function initSidebar() {
 }
 
 /* ==========================================================================
-   7.5. Active Response State and Response Viewer Rendering (Day 6)
+   7.5. Active Response State and Response Viewer Rendering (Day 6 & Day 7)
    ========================================================================== */
+
+/**
+ * Concurrency guard to prevent duplicate concurrent request execution
+ */
+let isRequestRunning = false;
+
+function getRequestRunning() {
+  return isRequestRunning;
+}
+
+function setRequestRunning(val) {
+  isRequestRunning = Boolean(val);
+}
+
+/**
+ * Sets or clears visual error indicators on the URL input bar
+ */
+function setUrlInputError(isError) {
+  if (typeof document === 'undefined') return;
+  const reqBar = document.querySelector('.request-bar');
+  const urlInput = document.getElementById('request-url-input');
+  if (reqBar) {
+    if (isError) reqBar.classList.add('has-error');
+    else reqBar.classList.remove('has-error');
+  }
+  if (urlInput) {
+    if (isError) urlInput.classList.add('input-error');
+    else urlInput.classList.remove('input-error');
+  }
+}
+
+/**
+ * Programmatically switches the active request configuration tab
+ * to focus the user on inputs requiring attention.
+ */
+function switchConfigTab(tabName) {
+  if (typeof document === 'undefined') return;
+  const configTabs = document.querySelectorAll('.config-tab');
+  configTabs.forEach((tab) => {
+    const isTarget = tab.getAttribute('data-tab') === tabName;
+    tab.classList.toggle('active', isTarget);
+    tab.setAttribute('aria-selected', isTarget ? 'true' : 'false');
+  });
+
+  const panels = document.querySelectorAll('.config-panel');
+  panels.forEach((p) => p.classList.remove('active'));
+
+  const activePanel = document.getElementById(`panel-${tabName}`);
+  if (activePanel) {
+    activePanel.classList.add('active');
+  }
+}
+
+/**
+ * Categorizes an error code into one of four distinct categories:
+ * - 'BLOCKED': SSRF destination restrictions
+ * - 'VALIDATION': Client or server request input validation failure
+ * - 'TRANSPORT': Network, DNS, timeout, or connection failure
+ * - 'INTERNAL': Unexpected server-side error
+ *
+ * @param {string} code
+ * @returns {'BLOCKED'|'VALIDATION'|'TRANSPORT'|'INTERNAL'}
+ */
+function classifyErrorCode(code) {
+  if (!code || typeof code !== 'string') return 'INTERNAL';
+  const upper = code.toUpperCase();
+  if (upper === 'BLOCKED_DESTINATION') {
+    return 'BLOCKED';
+  }
+  if ([
+    'INVALID_URL', 'MISSING_URL', 'MISSING_METHOD', 'UNSUPPORTED_METHOD',
+    'INVALID_HEADER', 'INVALID_HEADER_NAME', 'INVALID_HEADER_VALUE', 'INVALID_HEADERS',
+    'INVALID_JSON', 'INVALID_BODY', 'INVALID_AUTH', 'INVALID_SETTINGS',
+    'INVALID_PAYLOAD', 'PAYLOAD_TOO_LARGE'
+  ].includes(upper)) {
+    return 'VALIDATION';
+  }
+  if ([
+    'REQUEST_TIMEOUT', 'CONNECTION_ERROR', 'DNS_RESOLUTION_FAILED',
+    'TLS_ERROR', 'TOO_MANY_REDIRECTS', 'RESPONSE_TOO_LARGE', 'NETWORK_ERROR'
+  ].includes(upper)) {
+    return 'TRANSPORT';
+  }
+  return 'INTERNAL';
+}
 
 /**
  * State holding details of the most recent HTTP response.
@@ -1567,6 +1653,20 @@ function fallbackCopyText(text, successTitle, successMsg, failMsg) {
  * Marks response viewer as loading and resets stale metrics while a request executes.
  */
 function setResponseLoadingState() {
+  // Reset stale response state so it never misleadingly appears to belong to a new request
+  activeResponse.status = null;
+  activeResponse.statusText = '';
+  activeResponse.timeMs = null;
+  activeResponse.sizeBytes = null;
+  activeResponse.contentType = '';
+  activeResponse.headers = {};
+  activeResponse.body = null;
+  activeResponse.rawText = '';
+  activeResponse.isJson = false;
+  activeResponse.isBinary = false;
+  activeResponse.isMalformedJson = false;
+  activeResponse.isEmpty = false;
+
   if (typeof document === 'undefined') return;
 
   const statusBadge = document.getElementById('res-status-badge');
@@ -1576,7 +1676,10 @@ function setResponseLoadingState() {
   }
 
   const typeVal = document.getElementById('res-type-value');
-  if (typeVal) typeVal.textContent = '—';
+  if (typeVal) {
+    typeVal.textContent = '—';
+    typeVal.title = '';
+  }
 
   const timeVal = document.getElementById('res-time-value');
   if (timeVal) timeVal.textContent = '— ms';
@@ -1584,10 +1687,23 @@ function setResponseLoadingState() {
   const sizeVal = document.getElementById('res-size-value');
   if (sizeVal) sizeVal.textContent = '— B';
 
+  const headersCount = document.getElementById('res-headers-count');
+  if (headersCount) headersCount.textContent = '0';
+
+  const headersPanel = document.getElementById('panel-res-headers');
+  if (headersPanel) {
+    headersPanel.innerHTML = '<div class="response-empty-state"><p class="empty-state-desc">Waiting for response...</p></div>';
+  }
+
   const stateBanner = document.getElementById('response-state-banner');
   if (stateBanner) {
     stateBanner.className = 'response-state-banner hidden';
     stateBanner.innerHTML = '';
+  }
+
+  const codeEl = document.getElementById('response-code-display');
+  if (codeEl) {
+    codeEl.textContent = 'Sending request to destination...';
   }
 
   const contentArea = document.getElementById('response-content-area');
@@ -2050,9 +2166,11 @@ function renderResponseToUI(responseData) {
 }
 
 /**
- * Renders an execution error (e.g. timeout, SSRF blocked destination, DNS error).
- * @param {string} message
- * @param {string} code
+ * Renders an execution error (e.g. timeout, SSRF blocked destination, DNS error, validation error).
+ * Categorizes errors to give clear, actionable feedback to developers.
+ *
+ * @param {string} message - Descriptive error message
+ * @param {string} code - Machine-readable error code
  */
 function renderResponseError(message, code = 'ERROR') {
   activeResponse.status = null;
@@ -2070,14 +2188,25 @@ function renderResponseError(message, code = 'ERROR') {
 
   if (typeof document === 'undefined') return;
 
+  const category = classifyErrorCode(code);
+
   const statusBadge = document.getElementById('res-status-badge');
   if (statusBadge) {
-    statusBadge.textContent = `Error: ${code}`;
+    if (category === 'BLOCKED') {
+      statusBadge.textContent = `Blocked: ${code}`;
+    } else if (category === 'VALIDATION') {
+      statusBadge.textContent = `Validation: ${code}`;
+    } else {
+      statusBadge.textContent = `Error: ${code}`;
+    }
     statusBadge.className = 'metric-badge badge-error';
   }
 
   const typeVal = document.getElementById('res-type-value');
-  if (typeVal) typeVal.textContent = '—';
+  if (typeVal) {
+    typeVal.textContent = '—';
+    typeVal.title = '';
+  }
 
   const timeVal = document.getElementById('res-time-value');
   if (timeVal) timeVal.textContent = '— ms';
@@ -2087,14 +2216,28 @@ function renderResponseError(message, code = 'ERROR') {
 
   const stateBanner = document.getElementById('response-state-banner');
   if (stateBanner) {
-    stateBanner.className = 'response-state-banner banner-warning';
+    let bannerClass = 'banner-warning';
+    let bannerTitle = 'Request Failed:';
+
+    if (category === 'BLOCKED') {
+      bannerClass = 'banner-blocked';
+      bannerTitle = 'Security Policy Blocked:';
+    } else if (category === 'VALIDATION') {
+      bannerClass = 'banner-error';
+      bannerTitle = 'Validation Error:';
+    } else if (category === 'TRANSPORT') {
+      bannerClass = 'banner-warning';
+      bannerTitle = 'Transport / Network Error:';
+    }
+
+    stateBanner.className = `response-state-banner ${bannerClass}`;
     stateBanner.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
-      <span><strong>Request Failed:</strong> ${escapeHtml(message)}</span>
+      <span><strong>${bannerTitle}</strong> ${escapeHtml(message)}</span>
     `;
     stateBanner.classList.remove('hidden');
   }
@@ -2110,16 +2253,47 @@ function renderResponseError(message, code = 'ERROR') {
   }
 
   if (codeEl) {
-    codeEl.textContent = `Execution Failed: ${message}\nError Code: ${code}\n\nTroubleshooting Notes:\n- Destination may be unreachable or refused connection.\n- SSRF security blocks loopback, private IPs, and cloud metadata.\n- Outbound requests exceeding timeouts (300ms/10s) are terminated.`;
+    let notes = '';
+    if (category === 'BLOCKED') {
+      notes = 'Security Notice:\n- DevProbe SSRF protections prohibit loopback, private IPv4/IPv6 subnets, and cloud IMDS.\n- Connection was rejected before any outbound TCP/TLS socket was established.';
+    } else if (category === 'VALIDATION') {
+      notes = 'Validation Notice:\n- The request configuration was rejected prior to outbound dispatch.\n- Verify the target URL format, HTTP method, header names/values, and request body syntax.';
+    } else if (code === 'REQUEST_TIMEOUT') {
+      notes = 'Timeout Notice:\n- Outbound request exceeded the configured execution timeout.\n- The destination server did not complete sending a response in time.';
+    } else {
+      notes = 'Troubleshooting Notes:\n- Destination may be unreachable or refused connection.\n- SSRF security blocks loopback, private IPs, and cloud metadata.\n- Outbound requests exceeding timeouts (300ms/10s) are terminated.';
+    }
+
+    codeEl.textContent = `Execution Failed: ${message}\nError Code: ${code}\n\n${notes}`;
   }
+
+  const headersCount = document.getElementById('res-headers-count');
+  if (headersCount) headersCount.textContent = '0';
 
   renderResponseHeadersPanel();
 }
 
 /**
  * Executes the active request by dispatching to POST /api/requests/execute.
+ * Enforces client-side validation, prevents accidental duplicate submissions,
+ * clears stale response metadata, and provides consistent feedback.
  */
 async function handleSendRequest() {
+  // Prevent duplicate concurrent requests
+  if (isRequestRunning) {
+    return;
+  }
+
+  // 1. Validate HTTP Method
+  const supportedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+  if (!activeRequest.method || !supportedMethods.includes(activeRequest.method.toUpperCase())) {
+    const err = `Unsupported HTTP method '${activeRequest.method}'. Supported methods: ${supportedMethods.join(', ')}`;
+    renderResponseError(err, 'UNSUPPORTED_METHOD');
+    showToast('Unsupported Method', err, 'warning');
+    return;
+  }
+
+  // 2. Validate Target URL & Environment Variables
   const prepared = prepareRequestUrl(
     activeRequest.url,
     activeRequest.params,
@@ -2127,26 +2301,36 @@ async function handleSendRequest() {
   );
 
   if (!prepared.isValid) {
+    setUrlInputError(true);
+    renderResponseError(prepared.error || 'Please check your URL configuration.', 'INVALID_URL');
     showToast('Cannot Send Request', prepared.error || 'Please check your URL configuration.', 'warning');
+    const urlInput = document.getElementById('request-url-input');
+    if (urlInput) urlInput.focus();
     return;
   }
+  setUrlInputError(false);
 
-  // Validate headers before dispatch
+  // 3. Validate Headers (syntax & duplicate keys)
   const headerVal = validateHeaders(activeRequest.headers, false);
   if (!headerVal.isValid) {
+    switchConfigTab('headers');
+    renderResponseError(headerVal.errors[0], 'INVALID_HEADERS');
     showToast('Header Issues Detected', headerVal.errors[0], 'warning');
     return;
   }
 
-  // Validate JSON body if JSON mode is active and non-empty
+  // 4. Validate JSON Body
   if (activeRequest.body.type === 'json' && activeRequest.body.text && activeRequest.body.text.trim()) {
     const jsonVal = validateJsonBody(activeRequest.body.text, 'json', false);
     if (!jsonVal.isValid) {
+      switchConfigTab('body');
+      renderResponseError(jsonVal.message, 'INVALID_JSON');
       showToast('Invalid JSON Payload', jsonVal.message, 'warning');
       return;
     }
   }
 
+  isRequestRunning = true;
   const btnSend = document.getElementById('btn-send-request');
   const originalBtnHtml = btnSend ? btnSend.innerHTML : '';
 
@@ -2210,12 +2394,23 @@ async function handleSendRequest() {
       })
     });
 
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      data = {
+        success: false,
+        error: {
+          message: `Server returned non-JSON response (HTTP ${res.status})`,
+          code: res.status >= 500 ? 'INTERNAL_ERROR' : 'HTTP_ERROR'
+        }
+      };
+    }
 
     if (data.success && data.data) {
       renderResponseToUI(data.data);
       const s = data.data.status;
-      const toastType = s >= 200 && s < 400 ? 'success' : (s >= 400 && s < 500 ? 'warning' : 'warning');
+      const toastType = s >= 200 && s < 400 ? 'success' : 'warning';
       showToast(
         `Request Completed (${data.data.status} ${data.data.statusText})`,
         `Roundtrip completed in ${data.data.timeMs}ms (${data.data.sizeBytes} bytes).`,
@@ -2232,6 +2427,7 @@ async function handleSendRequest() {
     renderResponseError(netErr, 'NETWORK_ERROR');
     showToast('Connection Error', netErr, 'warning');
   } finally {
+    isRequestRunning = false;
     if (btnSend) {
       btnSend.disabled = false;
       btnSend.classList.remove('loading');
@@ -2427,6 +2623,12 @@ if (typeof window !== 'undefined') {
   window.DevProbe = {
     activeRequest,
     activeResponse,
+    isRequestRunning,
+    getRequestRunning,
+    setRequestRunning,
+    classifyErrorCode,
+    switchConfigTab,
+    setUrlInputError,
     ENVIRONMENTS,
     getEnvironmentVariable,
     resolveVariables,
@@ -2456,6 +2658,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     activeRequest,
     activeResponse,
+    isRequestRunning,
+    getRequestRunning,
+    setRequestRunning,
+    classifyErrorCode,
+    switchConfigTab,
+    setUrlInputError,
     ENVIRONMENTS,
     getEnvironmentVariable,
     resolveVariables,
@@ -2474,7 +2682,8 @@ if (typeof module !== 'undefined' && module.exports) {
     getContentType,
     highlightJsonToHtml,
     formatHeadersForCopy,
-    copyTextToClipboard
+    copyTextToClipboard,
+    showToast
   };
 }
 
