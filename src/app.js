@@ -10,6 +10,16 @@ const { EXECUTION_LIMITS } = require('./config/security');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Security hardening: Disable X-Powered-By fingerprinting header
+app.disable('x-powered-by');
+
+// Security headers middleware: prevent MIME sniffing and clickjacking
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
+
 // Body parsing middleware with configured payload limits
 app.use(express.json({ limit: EXECUTION_LIMITS.BODY_SIZE_LIMIT_EXPRESS }));
 app.use(express.urlencoded({ extended: true, limit: EXECUTION_LIMITS.BODY_SIZE_LIMIT_EXPRESS }));

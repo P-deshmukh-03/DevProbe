@@ -63,6 +63,7 @@ function validateRequestPayload(req, res, next) {
       return next(new AppError('Field \'headers\' must be a key-value object', 400, 'INVALID_HEADERS', null, 'headers'));
     }
 
+    const seenHeaderNames = new Set();
     for (const [headerName, headerVal] of Object.entries(payload.headers)) {
       // Validate header name according to RFC 7230 token specification
       if (typeof headerName !== 'string' || !HEADER_NAME_PATTERN.test(headerName)) {
@@ -75,10 +76,34 @@ function validateRequestPayload(req, res, next) {
         ));
       }
 
+      // Check for case-insensitive duplicate headers
+      const lowerHeaderName = headerName.toLowerCase();
+      if (seenHeaderNames.has(lowerHeaderName)) {
+        return next(new AppError(
+          `Duplicate header '${headerName}' detected (case-insensitive conflict). Header names must be unique.`,
+          400,
+          'DUPLICATE_HEADER',
+          null,
+          'headers'
+        ));
+      }
+      seenHeaderNames.add(lowerHeaderName);
+
       // Reject non-string header values
       if (typeof headerVal !== 'string') {
         return next(new AppError(
           `Invalid value for header '${headerName}'. Header values must be strings.`,
+          400,
+          'INVALID_HEADER_VALUE',
+          null,
+          'headers'
+        ));
+      }
+
+      // RFC 7230 / HTTP smuggling prevention: Header values must not contain CRLF characters
+      if (/[\r\n]/.test(headerVal)) {
+        return next(new AppError(
+          `Invalid value for header '${headerName}'. Header values must not contain newline or carriage return characters.`,
           400,
           'INVALID_HEADER_VALUE',
           null,

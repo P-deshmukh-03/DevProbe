@@ -73,10 +73,14 @@ function parseResponseBody(buffer, contentType = '') {
   const isBinaryType = ct.startsWith('image/') ||
                        ct.startsWith('audio/') ||
                        ct.startsWith('video/') ||
+                       ct.startsWith('font/') ||
+                       ct.startsWith('model/') ||
                        ct.includes('application/octet-stream') ||
                        ct.includes('application/pdf') ||
                        ct.includes('application/zip') ||
-                       ct.includes('application/gzip');
+                       ct.includes('application/gzip') ||
+                       ct.includes('application/wasm') ||
+                       ct.includes('application/x-protobuf');
 
   // Binary detection heuristic: check first 512 bytes for null byte (0x00)
   const sampleLength = Math.min(buffer.length, 512);
@@ -144,11 +148,33 @@ function dispatchSingleRequest({
     let timeoutTimer = null;
     let finished = false;
     let responseAborted = false;
+    let req = null;
+    let activeRes = null;
 
     const cleanup = () => {
       if (timeoutTimer) {
         clearTimeout(timeoutTimer);
         timeoutTimer = null;
+      }
+      if (req) {
+        try {
+          req.setTimeout(0);
+        } catch (_) {
+          // Socket might already be closed
+        }
+      }
+    };
+
+    const destroyResources = () => {
+      if (activeRes && !activeRes.destroyed) {
+        try {
+          activeRes.destroy();
+        } catch (_) {}
+      }
+      if (req && !req.destroyed) {
+        try {
+          req.destroy();
+        } catch (_) {}
       }
     };
 
@@ -174,95 +200,123 @@ function dispatchSingleRequest({
       }
     };
 
-    const req = client.request(requestOptions, (res) => {
-      let receivedBytes = 0;
-      const chunks = [];
+    try {
+      req = client.request(requestOptions, (res) => {
+        activeRes = res;
+        let receivedBytes = 0;
+        const chunks = [];
 
-      // Check upfront Content-Length header if provided
-      const contentLengthHeader = res.headers['content-length'];
-      if (contentLengthHeader) {
-        const declaredLength = parseInt(contentLengthHeader, 10);
-        if (!isNaN(declaredLength) && declaredLength > maxResponseSizeBytes) {
-          responseAborted = true;
-          cleanup();
-          req.destroy();
-          return reject(new AppError(
-            `Response size (${declaredLength} bytes) exceeds maximum permitted limit of ${maxResponseSizeBytes} bytes (5 MB).`,
-            413,
-            'RESPONSE_TOO_LARGE'
-          ));
-        }
-      }
-
-      // Stream response chunks and enforce hard size limit
-      res.on('data', (chunk) => {
-        if (responseAborted) return;
-        receivedBytes += chunk.length;
-
-        if (receivedBytes > maxResponseSizeBytes) {
-          responseAborted = true;
-          cleanup();
-          req.destroy();
-          return reject(new AppError(
-            `Response stream exceeded maximum allowed limit of ${maxResponseSizeBytes} bytes (5 MB).`,
-            413,
-            'RESPONSE_TOO_LARGE'
-          ));
-        }
-
-        chunks.push(chunk);
-      });
-
-      res.on('end', () => {
-        if (responseAborted || finished) return;
-        finished = true;
-        cleanup();
-
-        const endTime = process.hrtime.bigint();
-        const timeMs = Math.max(1, Math.round(Number(endTime - startTime) / 1e6));
-
-        const rawBuffer = Buffer.concat(chunks);
-        const sizeBytes = rawBuffer.length;
-
-        // Filter sensitive response headers before returning metadata to frontend
-        const safeHeaders = {};
-        for (const [k, v] of Object.entries(res.headers)) {
-          if (!SENSITIVE_RESPONSE_HEADERS.has(k.toLowerCase())) {
-            safeHeaders[k] = v;
+        // Check upfront Content-Length header if provided
+        const contentLengthHeader = res.headers['content-length'];
+        if (contentLengthHeader) {
+          const declaredLength = parseInt(contentLengthHeader, 10);
+          if (!isNaN(declaredLength) && declaredLength > maxResponseSizeBytes) {
+            responseAborted = true;
+            finished = true;
+            cleanup();
+            destroyResources();
+            return reject(new AppError(
+              `Response size (${declaredLength} bytes) exceeds maximum permitted limit of ${maxResponseSizeBytes} bytes (5 MB).`,
+              413,
+              'RESPONSE_TOO_LARGE'
+            ));
           }
         }
 
-        const parsedBody = parseResponseBody(rawBuffer, res.headers['content-type']);
-        const isBinary = typeof parsedBody === 'object' && parsedBody !== null && parsedBody.isBinary;
-        const rawText = isBinary
-          ? (parsedBody.preview || '[Binary Content]')
-          : rawBuffer.toString('utf8');
+        // Stream response chunks and enforce hard size limit
+        res.on('data', (chunk) => {
+          if (responseAborted || finished) return;
+          receivedBytes += chunk.length;
 
-        resolve({
-          status: res.statusCode || 200,
-          statusText: res.statusMessage || http.STATUS_CODES[res.statusCode] || '',
-          timeMs,
-          sizeBytes,
-          headers: safeHeaders,
-          body: parsedBody,
-          rawText
+          if (receivedBytes > maxResponseSizeBytes) {
+            responseAborted = true;
+            finished = true;
+            cleanup();
+            destroyResources();
+            return reject(new AppError(
+              `Response stream exceeded maximum allowed limit of ${maxResponseSizeBytes} bytes (5 MB).`,
+              413,
+              'RESPONSE_TOO_LARGE'
+            ));
+          }
+
+          chunks.push(chunk);
+        });
+
+        res.on('end', () => {
+          if (responseAborted || finished) return;
+
+          // Guard against incomplete/truncated responses
+          if (!res.complete) {
+            finished = true;
+            cleanup();
+            destroyResources();
+            return reject(new AppError('Incomplete HTTP response received from server', 502, 'CONNECTION_ERROR'));
+          }
+
+          finished = true;
+          cleanup();
+
+          const endTime = process.hrtime.bigint();
+          const timeMs = Math.max(1, Math.round(Number(endTime - startTime) / 1e6));
+
+          const rawBuffer = Buffer.concat(chunks);
+          const sizeBytes = rawBuffer.length;
+
+          // Filter sensitive response headers before returning metadata to frontend
+          const safeHeaders = {};
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (!SENSITIVE_RESPONSE_HEADERS.has(k.toLowerCase())) {
+              safeHeaders[k] = v;
+            }
+          }
+
+          const parsedBody = parseResponseBody(rawBuffer, res.headers['content-type']);
+          const isBinary = typeof parsedBody === 'object' && parsedBody !== null && parsedBody.isBinary;
+          const rawText = isBinary
+            ? (parsedBody.preview || '[Binary Content]')
+            : rawBuffer.toString('utf8');
+
+          resolve({
+            status: res.statusCode || 200,
+            statusText: res.statusMessage || http.STATUS_CODES[res.statusCode] || '',
+            timeMs,
+            sizeBytes,
+            headers: safeHeaders,
+            body: parsedBody,
+            rawText
+          });
+        });
+
+        // Aborted / prematurely closed response stream
+        res.on('close', () => {
+          if (!finished && !responseAborted && !res.complete) {
+            finished = true;
+            cleanup();
+            destroyResources();
+            return reject(new AppError('Response connection was closed before payload completed', 502, 'CONNECTION_ERROR'));
+          }
+        });
+
+        res.on('error', (streamErr) => {
+          if (responseAborted || finished) return;
+          finished = true;
+          cleanup();
+          destroyResources();
+          reject(new AppError(`Response stream error: ${streamErr.message}`, 502, 'CONNECTION_ERROR'));
         });
       });
-
-      res.on('error', (streamErr) => {
-        if (responseAborted || finished) return;
-        finished = true;
-        cleanup();
-        reject(new AppError(`Response stream error: ${streamErr.message}`, 502, 'CONNECTION_ERROR'));
-      });
-    });
+    } catch (initErr) {
+      cleanup();
+      return reject(new AppError(`Failed to initialize request: ${initErr.message}`, 400, 'INVALID_REQUEST'));
+    }
 
     // Enforce overall request timeout
     timeoutTimer = setTimeout(() => {
       if (finished) return;
       finished = true;
       cleanup();
-      req.destroy();
+      destroyResources();
       reject(new AppError(`Request timed out after ${timeoutMs}ms`, 504, 'REQUEST_TIMEOUT'));
     }, timeoutMs);
 
@@ -271,7 +325,7 @@ function dispatchSingleRequest({
       if (finished) return;
       finished = true;
       cleanup();
-      req.destroy();
+      destroyResources();
       reject(new AppError(`Connection socket timed out after ${timeoutMs}ms`, 504, 'REQUEST_TIMEOUT'));
     });
 
@@ -279,6 +333,7 @@ function dispatchSingleRequest({
       if (finished || responseAborted) return;
       finished = true;
       cleanup();
+      destroyResources();
 
       if (err instanceof AppError) {
         return reject(err);
@@ -533,6 +588,17 @@ async function executeRequest(validatedRequest, executionOptions = {}) {
         removeHeader(currentHeaders, 'authorization');
         removeHeader(currentHeaders, 'cookie');
         removeHeader(currentHeaders, 'proxy-authorization');
+        removeHeader(currentHeaders, 'x-api-key');
+        removeHeader(currentHeaders, 'api-key');
+        removeHeader(currentHeaders, 'x-auth-token');
+        removeHeader(currentHeaders, 'auth-token');
+        removeHeader(currentHeaders, 'access-token');
+        removeHeader(currentHeaders, 'x-access-token');
+        removeHeader(currentHeaders, 'session-token');
+        removeHeader(currentHeaders, 'x-session-token');
+        removeHeader(currentHeaders, 'apikey');
+        removeHeader(currentHeaders, 'secret');
+        removeHeader(currentHeaders, 'token');
       }
 
       // Method and body transitions per RFC 7231

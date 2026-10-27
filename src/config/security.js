@@ -58,9 +58,15 @@ const SENSITIVE_HEADERS = Object.freeze(new Set([
   'proxy-authorization',
   'cookie',
   'set-cookie',
+  'set-cookie2',
   'x-api-key',
   'api-key',
   'x-auth-token',
+  'auth-token',
+  'access-token',
+  'x-access-token',
+  'session-token',
+  'x-session-token',
   'apikey',
   'secret',
   'token',
@@ -83,7 +89,11 @@ const PROHIBITED_DOMAIN_SUFFIXES = Object.freeze([
   '.local',
   '.internal',
   '.lan',
-  '.home.arpa'
+  '.home.arpa',
+  '.corp',
+  '.home',
+  '.intranet',
+  '.onion'
 ]);
 
 /**
@@ -147,6 +157,11 @@ function isPrivateOrReservedIPv4(octets) {
     return { isPrivate: true, reason: 'Documentation network TEST-NET-1 (192.0.2.0/24)' };
   }
 
+  // 192.88.99.0/24 - 6to4 Relay Anycast (RFC 3068 / RFC 7526)
+  if (o1 === 192 && o2 === 88 && o3 === 99) {
+    return { isPrivate: true, reason: '6to4 Relay Anycast network (192.88.99.0/24)' };
+  }
+
   // 198.18.0.0/15 - Benchmark testing (198.18.0.0 - 198.19.255.255)
   if (o1 === 198 && (o2 === 18 || o2 === 19)) {
     return { isPrivate: true, reason: 'Benchmark testing address space (198.18.0.0/15)' };
@@ -183,6 +198,11 @@ function isPrivateOrReservedIPv4(octets) {
 function expandIPv6(ip) {
   let normalized = ip.toLowerCase();
 
+  // Strip IPv6 zone/scope identifier (e.g. fe80::1%eth0)
+  if (normalized.includes('%')) {
+    normalized = normalized.split('%')[0];
+  }
+
   // Handle embedded IPv4 notation in IPv6 (e.g. ::ffff:192.0.2.1)
   if (normalized.includes('.')) {
     const lastColon = normalized.lastIndexOf(':');
@@ -212,6 +232,10 @@ function expandIPv6(ip) {
   const fullHex = [...head, ...middle, ...tail];
 
   if (fullHex.length !== 8) return null;
+
+  for (const h of fullHex) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(h)) return null;
+  }
 
   return fullHex.map(h => parseInt(h || '0', 16));
 }
@@ -252,6 +276,45 @@ function isPrivateOrReservedIPv6(words) {
     }
   }
 
+  // 6to4 prefix (2002::/16) - embeds IPv4 in words[1] and words[2]
+  if (words[0] === 0x2002) {
+    const octet1 = (words[1] >> 8) & 0xff;
+    const octet2 = words[1] & 0xff;
+    const octet3 = (words[2] >> 8) & 0xff;
+    const octet4 = words[2] & 0xff;
+    const v4Check = isPrivateOrReservedIPv4([octet1, octet2, octet3, octet4]);
+    if (v4Check.isPrivate) {
+      return { isPrivate: true, reason: `6to4 private destination rejected: ${v4Check.reason}` };
+    }
+  }
+
+  // IPv4-IPv6 translation / NAT64 prefix (64:ff9b::/96) - embeds IPv4 in words[6] and words[7]
+  if (
+    words[0] === 0x0064 && words[1] === 0xff9b && words[2] === 0 &&
+    words[3] === 0 && words[4] === 0 && words[5] === 0
+  ) {
+    const octet1 = (words[6] >> 8) & 0xff;
+    const octet2 = words[6] & 0xff;
+    const octet3 = (words[7] >> 8) & 0xff;
+    const octet4 = words[7] & 0xff;
+    const v4Check = isPrivateOrReservedIPv4([octet1, octet2, octet3, octet4]);
+    if (v4Check.isPrivate) {
+      return { isPrivate: true, reason: `IPv4-IPv6 translation (NAT64) private destination rejected: ${v4Check.reason}` };
+    }
+  }
+
+  // Teredo tunneling prefix (2001:0000::/32, RFC 4380) - embeds inverted client IPv4 in words[6] and words[7]
+  if (words[0] === 0x2001 && words[1] === 0x0000) {
+    const octet1 = ((words[6] >> 8) & 0xff) ^ 0xff;
+    const octet2 = (words[6] & 0xff) ^ 0xff;
+    const octet3 = ((words[7] >> 8) & 0xff) ^ 0xff;
+    const octet4 = (words[7] & 0xff) ^ 0xff;
+    const v4Check = isPrivateOrReservedIPv4([octet1, octet2, octet3, octet4]);
+    if (v4Check.isPrivate) {
+      return { isPrivate: true, reason: `Teredo tunneled private destination rejected: ${v4Check.reason}` };
+    }
+  }
+
   // Unique local addresses (fc00::/7) - includes fc00:: and fd00::
   const firstWord = words[0];
   if ((firstWord & 0xfe00) === 0xfc00) {
@@ -276,6 +339,16 @@ function isPrivateOrReservedIPv6(words) {
   // Documentation prefix (2001:db8::/32)
   if (words[0] === 0x2001 && words[1] === 0x0db8) {
     return { isPrivate: true, reason: 'IPv6 Documentation prefix (2001:db8::/32)' };
+  }
+
+  // Benchmarking prefix (2001:2::/48, RFC 5180)
+  if (words[0] === 0x2001 && words[1] === 0x0002 && (words[2] & 0xfff0) === 0) {
+    return { isPrivate: true, reason: 'IPv6 Benchmarking prefix (2001:2::/48)' };
+  }
+
+  // ORCHIDv2 prefix (2001:20::/28, RFC 7343)
+  if (words[0] === 0x2001 && (words[1] & 0xfff0) === 0x0020) {
+    return { isPrivate: true, reason: 'IPv6 ORCHIDv2 prefix (2001:20::/28)' };
   }
 
   return { isPrivate: false };
@@ -318,6 +391,17 @@ function validateTargetUrl(rawUrl, options = {}) {
     };
   }
 
+  // 3. Validate Port range if explicitly specified
+  if (parsed.port) {
+    const portNum = Number(parsed.port);
+    if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) {
+      return {
+        isValid: false,
+        error: `Invalid port number '${parsed.port}'. Ports must be integers between 1 and 65535.`
+      };
+    }
+  }
+
   // Extract hostname (strip bracket enclosures if IPv6 literal)
   let hostname = parsed.hostname;
   if (hostname.startsWith('[') && hostname.endsWith(']')) {
@@ -329,16 +413,22 @@ function validateTargetUrl(rawUrl, options = {}) {
   }
 
   const lowerHostname = hostname.toLowerCase();
+  // Strip trailing dots (DNS root label) for consistent normalization
+  const normalizedHostname = lowerHostname.replace(/\.+$/, '');
+
+  if (!normalizedHostname) {
+    return { isValid: false, error: 'URL contains an invalid empty hostname' };
+  }
 
   // 1. Prohibited Cloud Metadata must NEVER be allowed under any circumstance (even when allowLocal is true)
-  if (PROHIBITED_SPECIFIC_IPS.includes(lowerHostname)) {
+  if (PROHIBITED_SPECIFIC_IPS.includes(lowerHostname) || PROHIBITED_SPECIFIC_IPS.includes(normalizedHostname)) {
     return {
       isValid: false,
       error: `Access to cloud metadata service IP '${hostname}' is prohibited.`
     };
   }
   const CLOUD_METADATA_HOSTNAMES = ['metadata.google.internal', 'instance-data', 'metadata'];
-  if (CLOUD_METADATA_HOSTNAMES.includes(lowerHostname)) {
+  if (CLOUD_METADATA_HOSTNAMES.includes(lowerHostname) || CLOUD_METADATA_HOSTNAMES.includes(normalizedHostname)) {
     return {
       isValid: false,
       error: `Access to prohibited cloud metadata hostname '${hostname}' is blocked for SSRF protection.`
@@ -351,7 +441,7 @@ function validateTargetUrl(rawUrl, options = {}) {
   }
 
   // 2. Reject Known Prohibited Hostnames and Domains
-  if (PROHIBITED_HOSTNAMES.includes(lowerHostname)) {
+  if (PROHIBITED_HOSTNAMES.includes(lowerHostname) || PROHIBITED_HOSTNAMES.includes(normalizedHostname)) {
     return {
       isValid: false,
       error: `Access to prohibited hostname '${hostname}' is blocked for SSRF protection.`
@@ -359,7 +449,11 @@ function validateTargetUrl(rawUrl, options = {}) {
   }
 
   for (const suffix of PROHIBITED_DOMAIN_SUFFIXES) {
-    if (lowerHostname.endsWith(suffix)) {
+    if (
+      lowerHostname.endsWith(suffix) ||
+      normalizedHostname.endsWith(suffix) ||
+      ('.' + normalizedHostname).endsWith(suffix)
+    ) {
       return {
         isValid: false,
         error: `Access to local/internal domain '${hostname}' is blocked for SSRF protection.`
@@ -368,10 +462,10 @@ function validateTargetUrl(rawUrl, options = {}) {
   }
 
   // 5. Check if hostname is an IPv4 or IPv6 address literal
-  const ipType = net.isIP(hostname);
+  const ipType = net.isIP(normalizedHostname);
 
   if (ipType === 4) {
-    const octets = hostname.split('.').map(Number);
+    const octets = normalizedHostname.split('.').map(Number);
     const ipCheck = isPrivateOrReservedIPv4(octets);
     if (ipCheck.isPrivate) {
       return {
@@ -380,7 +474,7 @@ function validateTargetUrl(rawUrl, options = {}) {
       };
     }
   } else if (ipType === 6) {
-    const words = expandIPv6(hostname);
+    const words = expandIPv6(normalizedHostname);
     if (words) {
       const ipCheck = isPrivateOrReservedIPv6(words);
       if (ipCheck.isPrivate) {
@@ -431,6 +525,7 @@ function isRestrictedIp(ipAddress) {
   if (cleanIp.startsWith('[') && cleanIp.endsWith(']')) {
     cleanIp = cleanIp.slice(1, -1);
   }
+  cleanIp = cleanIp.replace(/\.+$/, '');
 
   const lowerIp = cleanIp.toLowerCase();
   if (PROHIBITED_SPECIFIC_IPS.includes(lowerIp)) {
@@ -490,10 +585,24 @@ async function resolveAndValidateDestination(hostname, options = {}) {
   }
 
   const lowerHost = cleanHost.toLowerCase();
+  const normalizedHost = lowerHost.replace(/\.+$/, '');
+
+  if (!normalizedHost) {
+    return {
+      isValid: false,
+      code: 'INVALID_HOSTNAME',
+      error: 'Hostname must be a non-empty string'
+    };
+  }
 
   // 1. Prohibited Cloud Metadata must NEVER be allowed under any circumstance (even when allowLocal is true)
   const CLOUD_METADATA_HOSTNAMES = ['metadata.google.internal', 'instance-data', 'metadata'];
-  if (CLOUD_METADATA_HOSTNAMES.includes(lowerHost) || PROHIBITED_SPECIFIC_IPS.includes(lowerHost)) {
+  if (
+    CLOUD_METADATA_HOSTNAMES.includes(lowerHost) ||
+    CLOUD_METADATA_HOSTNAMES.includes(normalizedHost) ||
+    PROHIBITED_SPECIFIC_IPS.includes(lowerHost) ||
+    PROHIBITED_SPECIFIC_IPS.includes(normalizedHost)
+  ) {
     return {
       isValid: false,
       code: 'BLOCKED_DESTINATION',
@@ -503,7 +612,7 @@ async function resolveAndValidateDestination(hostname, options = {}) {
 
   if (!allowLocal) {
     // Check prohibited hostname literals
-    if (PROHIBITED_HOSTNAMES.includes(lowerHost)) {
+    if (PROHIBITED_HOSTNAMES.includes(lowerHost) || PROHIBITED_HOSTNAMES.includes(normalizedHost)) {
       return {
         isValid: false,
         code: 'BLOCKED_DESTINATION',
@@ -513,7 +622,11 @@ async function resolveAndValidateDestination(hostname, options = {}) {
 
     // Check prohibited domain suffixes
     for (const suffix of PROHIBITED_DOMAIN_SUFFIXES) {
-      if (lowerHost.endsWith(suffix)) {
+      if (
+        lowerHost.endsWith(suffix) ||
+        normalizedHost.endsWith(suffix) ||
+        ('.' + normalizedHost).endsWith(suffix)
+      ) {
         return {
           isValid: false,
           code: 'BLOCKED_DESTINATION',
@@ -524,9 +637,9 @@ async function resolveAndValidateDestination(hostname, options = {}) {
   }
 
   // 2. If hostname is already an IP literal
-  const literalType = net.isIP(cleanHost);
+  const literalType = net.isIP(normalizedHost);
   if (literalType !== 0) {
-    if (PROHIBITED_SPECIFIC_IPS.includes(lowerHost)) {
+    if (PROHIBITED_SPECIFIC_IPS.includes(normalizedHost)) {
       return {
         isValid: false,
         code: 'BLOCKED_DESTINATION',
@@ -535,7 +648,7 @@ async function resolveAndValidateDestination(hostname, options = {}) {
     }
 
     if (!allowLocal) {
-      const check = isRestrictedIp(cleanHost);
+      const check = isRestrictedIp(normalizedHost);
       if (check.isRestricted) {
         return {
           isValid: false,
@@ -547,8 +660,8 @@ async function resolveAndValidateDestination(hostname, options = {}) {
 
     return {
       isValid: true,
-      addresses: [{ address: cleanHost, family: literalType }],
-      pinnedIp: cleanHost,
+      addresses: [{ address: normalizedHost, family: literalType }],
+      pinnedIp: normalizedHost,
       pinnedFamily: literalType
     };
   }
@@ -557,9 +670,9 @@ async function resolveAndValidateDestination(hostname, options = {}) {
   let resolvedRecords;
   try {
     if (typeof options.dnsResolver === 'function') {
-      resolvedRecords = await options.dnsResolver(cleanHost);
+      resolvedRecords = await options.dnsResolver(normalizedHost);
     } else {
-      resolvedRecords = await dns.promises.lookup(cleanHost, { all: true });
+      resolvedRecords = await dns.promises.lookup(normalizedHost, { all: true });
     }
   } catch (dnsErr) {
     return {
