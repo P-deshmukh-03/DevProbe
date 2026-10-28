@@ -6,6 +6,7 @@ const path = require('path');
 const requestRoutes = require('./routes/requestRoutes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { EXECUTION_LIMITS } = require('./config/security');
+const { checkDatabaseHealth, closePool } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,12 +28,34 @@ app.use(express.urlencoded({ extended: true, limit: EXECUTION_LIMITS.BODY_SIZE_L
 // Serve static assets from public directory
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Health check endpoint
+// Health check endpoint (preserves existing Day 3–8 contract)
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: 'DevProbe server is running'
   });
+});
+
+// Database readiness endpoint (Day 9: MySQL Health Check)
+app.get('/api/health/db', async (req, res) => {
+  try {
+    const dbHealth = await checkDatabaseHealth();
+    const statusCode = dbHealth.isConnected ? 200 : 503;
+    return res.status(statusCode).json({
+      success: dbHealth.isConnected,
+      database: dbHealth
+    });
+  } catch {
+    return res.status(503).json({
+      success: false,
+      database: {
+        isConnected: false,
+        status: 'disconnected',
+        message: 'Database readiness check failed',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
 });
 
 // API Routes
@@ -51,9 +74,21 @@ app.use(errorHandler);
 
 // Start the server if executed directly
 if (require.main === module) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`DevProbe server is running at http://localhost:${PORT}`);
   });
+
+  // Graceful shutdown handling
+  const shutdown = async () => {
+    console.log('Shutting down DevProbe server...');
+    server.close(async () => {
+      await closePool();
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 module.exports = app;

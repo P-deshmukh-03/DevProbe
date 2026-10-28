@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "node test-day3.js && node test-day4.js && node test-day5.js && node test-day6.js && node test-day7.js && node test-day8.js",
+    "test": "node test-day3.js && node test-day4.js && node test-day5.js && node test-day6.js && node test-day7.js && node test-day8.js && node test-day9.js",
     "test:day3": "node test-day3.js",
     "test:day4": "node test-day4.js",
     "test:day5": "node test-day5.js",
     "test:day6": "node test-day6.js",
     "test:day7": "node test-day7.js",
-    "test:day8": "node test-day8.js"
+    "test:day8": "node test-day8.js",
+    "test:day9": "node test-day9.js",
+    "db:init": "node database/init.js"
   },
   "keywords": [],
   "author": "",
@@ -20,7 +22,8 @@
   "type": "commonjs",
   "dependencies": {
     "dotenv": "^18.0.8",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

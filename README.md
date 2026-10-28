@@ -13,19 +13,24 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 | JavaScript | Frontend reactivity, state engine & backend server logic |
 | Node.js | Backend JavaScript runtime |
 | Express.js | Backend server, API routes, and middleware pipeline |
-| MySQL | Database for persistent storage (planned) |
+| MySQL / MariaDB | Relational database persistence (collections, saved requests) |
+| mysql2 | High-performance Promise-based MySQL driver with connection pooling |
 | Git & GitHub | Version control and collaboration |
 
 ## 📅 Current Development Status
 
-**Day 5 of 16 — Real HTTP Request Execution Engine**
+**Day 9 of 16 — MySQL Database Integration**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
 - **Day 2**: Modern Postman-inspired dark-mode workspace UI with responsive sidebar, request bar, tabs, and response viewer.
 - **Day 3**: Centralized client-side request state management, parameter parsing, header validation, variable resolution (`{{base_url}}`), and in-memory credential handling.
 - **Day 4**: Layered backend architecture, preparation-only validation endpoint (`POST /api/requests/validate`), security configuration & initial SSRF defense layer, execution limits, centralized error handling, and automated test suite.
-- **Day 5**: Real outbound HTTP request execution engine (`POST /api/requests/execute`), DNS pre-resolution with comprehensive IP range checking, DNS rebinding protection via socket-level connection pinning, manual redirect loop with destination re-validation and credential stripping, response streaming size limit enforcement (5 MB), monotonic latency measurement, response viewer integration, and complete automated verification suite (80 tests).
+- **Day 5**: Real outbound HTTP request execution engine (`POST /api/requests/execute`), DNS pre-resolution with comprehensive IP range checking, DNS rebinding protection via socket-level connection pinning, manual redirect loop with destination re-validation and credential stripping, response streaming size limit enforcement (5 MB), monotonic latency measurement, response viewer integration, and complete automated verification suite.
+- **Day 6**: Response viewer syntax highlighting, safe XSS-free DOM rendering, Copy Body and Copy Headers actions with clipboard fallback, multi-state response handling (JSON, text, empty 204, malformed, binary preview suppression), and consecutive request state resetting.
+- **Day 7**: Advanced error handling, standardized AppError classification, CRLF injection prevention, duplicate header detection, security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-Powered-By` disabling), and regression test suite.
+- **Day 8**: Security audit, IPv6 tunneling/transition defenses (6to4, NAT64, Teredo), trailing-dot domain bypass prevention, sensitive response header redaction (`Set-Cookie`), socket timeout cleanup, and response viewer layout clipping resolution.
+- **Day 9**: MySQL database connection layer with `mysql2/promise` connection pooling, configuration via environment variables, initial relational schema (`collections`, `saved_requests`), safe error handling without credential leakage, database readiness health-check endpoint (`GET /api/health/db`), and automated Day 9 test suite.
 
 ## ✨ Features
 
@@ -45,6 +50,10 @@ Completed Milestones:
 ```text
 DevProbe/
 │
+├── database/
+│   ├── schema.sql                  # Initial MySQL/MariaDB DDL schema (collections, saved_requests)
+│   └── init.js                     # Safe database initialization & migration script
+│
 ├── public/
 │   ├── index.html                  # DevProbe workspace HTML interface
 │   ├── css/
@@ -53,8 +62,9 @@ DevProbe/
 │       └── app.js                  # Frontend state management, Send button dispatch, & response renderer
 │
 ├── src/
-│   ├── app.js                      # Express application entry point & middleware pipeline
+│   ├── app.js                      # Express application entry point, health check, & database readiness
 │   ├── config/
+│   │   ├── database.js             # MySQL connection pool, health check, & sanitized error handling
 │   │   └── security.js             # Security policies, SSRF defenses, DNS validation, & execution limits
 │   ├── controllers/
 │   │   └── requestController.js    # Request controller (validate & execute endpoints)
@@ -67,8 +77,12 @@ DevProbe/
 │       └── requestService.js       # Real execution engine, DNS pinning, & normalization service
 │
 ├── test-day3.js                    # Day 3 automated verification test suite (34 tests)
-├── test-day4.js                    # Day 4 automated verification test suite (67 tests, Tests A-M)
-├── test-day5.js                    # Day 5 automated verification test suite (80 tests, Tests A-R)
+├── test-day4.js                    # Day 4 automated verification test suite (36 tests)
+├── test-day5.js                    # Day 5 automated verification test suite (44 tests)
+├── test-day6.js                    # Day 6 automated verification test suite (118 tests)
+├── test-day7.js                    # Day 7 automated verification test suite (62 tests)
+├── test-day8.js                    # Day 8 automated verification test suite (71 tests)
+├── test-day9.js                    # Day 9 automated database integration test suite (61 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -81,7 +95,8 @@ DevProbe/
 
 DevProbe adheres to a structured, layered architecture:
 
-- **`src/app.js`**: Bootstraps the Express application, configures body-parsers with payload limits (`1mb`), serves public assets, mounts API routes, registers the 404 handler, and registers centralized error handling.
+- **`src/app.js`**: Bootstraps the Express application, configures security headers (`nosniff`, `DENY`), serves public assets, mounts API routes, provides application health check (`GET /api/health`) and database readiness check (`GET /api/health/db`), and manages graceful shutdown.
+- **`src/config/database.js`**: Manages the MySQL connection pool singleton via `mysql2/promise`, reads configuration from environment variables, provides connectivity test and health check helpers, enforces parameterized query safety, and translates raw database errors into sanitized user-safe diagnostics.
 - **`src/config/security.js`**: Defines execution limits (timeouts, payload sizes, redirects), permitted methods/protocols, sensitive header classifications, hop-by-hop header lists, and SSRF defense logic (inspects hostnames, IPv4 ranges, IPv6 representations, IPv4-mapped IPv6, and cloud metadata addresses).
 - **`src/middleware/validateRequest.js`**: Validates incoming request payloads for both `/validate` and `/execute`. Rejects unsupported methods, malformed URLs, non-HTTP protocols, embedded credentials, restricted destinations, invalid RFC 7230 headers, and oversized payloads.
 - **`src/middleware/errorHandler.js`**: Intercepts JSON syntax errors, payload size limits (413), validation errors (400), unknown routes (404), and upstream network errors. Guarantees consistent JSON error structures and prevents leakage of internal stack traces, filesystem paths, or secrets.
@@ -146,7 +161,7 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
 
 ## 🌐 API Endpoints
 
-### 1. Health Check
+### 1. Application Health Check (Liveness)
 - **Route**: `GET /api/health`
 - **Status**: `200 OK`
 - **Response**:
@@ -157,7 +172,37 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
   }
   ```
 
-### 2. Request Configuration Validation (Preparation-Only)
+### 2. Database Readiness Check (Day 9)
+- **Route**: `GET /api/health/db`
+- **Status**: `200 OK` (when connected) or `503 Service Unavailable` (when database service is offline)
+- **Example Response (Connected)**:
+  ```json
+  {
+    "success": true,
+    "database": {
+      "isConnected": true,
+      "status": "connected",
+      "message": "Database connection established successfully",
+      "timestamp": "2026-10-28T11:40:00.000Z",
+      "database": "devprobe_db"
+    }
+  }
+  ```
+- **Example Response (Disconnected / Offline MySQL)**:
+  ```json
+  {
+    "success": false,
+    "database": {
+      "isConnected": false,
+      "status": "disconnected",
+      "message": "Database server refused connection. Verify MySQL service is running.",
+      "timestamp": "2026-10-28T11:40:00.000Z",
+      "database": "devprobe_db"
+    }
+  }
+  ```
+
+### 3. Request Configuration Validation (Preparation-Only)
 - **Route**: `POST /api/requests/validate`
 - **Description**: Validates request parameters and produces a normalized execution plan. **Does not perform any outbound network calls.**
 - **Status**: `200 OK`
@@ -246,8 +291,9 @@ Common Error Codes:
 - [Node.js](https://nodejs.org/) (v18+ recommended)
 - [npm](https://www.npmjs.com/)
 - [Git](https://git-scm.com/)
+- [MySQL](https://www.mysql.com/) / [MariaDB](https://mariadb.org/) (or [XAMPP](https://www.apachefriends.org/) with MySQL service)
 
-### 1. Clone & Install
+### 1. Clone & Install Dependencies
 
 ```bash
 git clone https://github.com/P-deshmukh-03/DevProbe.git
@@ -255,78 +301,124 @@ cd DevProbe
 npm install
 ```
 
-### 2. Configure Environment
+### 2. Configure Environment Variables
 
 Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
 
-Contents:
+Default configuration for local development with XAMPP:
 ```dotenv
 PORT=3000
 NODE_ENV=development
+
+# Database Configuration (MySQL / XAMPP)
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=devprobe_db
+DB_USER=root
+DB_PASSWORD=
+DB_CONNECTION_LIMIT=10
+DB_CONNECT_TIMEOUT=10000
+
+# Security / SSRF configuration
 DEVPROBE_ALLOW_LOCAL_TARGETS=false
 ```
 
-### 3. Start Application
+### 3. Start MySQL in XAMPP
 
-- **Development Mode**:
+If you are using XAMPP for local MySQL development:
+1. Open the **XAMPP Control Panel**.
+2. Locate the **MySQL** module row.
+3. Click the **Start** button next to MySQL.
+4. Verify the status indicator turns green and displays Port **`3306`**.
+
+### 4. Initialize Database Schema
+
+You can apply the initial relational schema (`collections`, `saved_requests`) using any of the following methods:
+
+- **Method A (Node.js automated runner)**:
+  ```bash
+  npm run db:init
+  ```
+- **Method B (phpMyAdmin web interface)**:
+  1. Open [http://localhost/phpmyadmin](http://localhost/phpmyadmin) in your browser.
+  2. Create a new database named `devprobe_db` with collation `utf8mb4_unicode_ci`.
+  3. Click **Import**, choose `database/schema.sql`, and click **Go**.
+- **Method C (MySQL CLI / PowerShell)**:
+  ```powershell
+  # Using XAMPP's mysql binary
+  & "C:\xampp\mysql\bin\mysql.exe" -u root < database/schema.sql
+  ```
+
+### 5. Start Application
+
+- **Development Mode** (auto-restart with nodemon):
   ```bash
   npm run dev
   ```
-- **Production Mode**:
+- **Production / Standard Mode**:
   ```bash
   npm start
   ```
 
 Open browser at `http://localhost:3000`.
 
-## 🧪 Automated Testing
-
-DevProbe features a multi-tiered test suite with 181 automated tests verifying frontend state, backend validation, SSRF defenses, and real outbound request execution:
-
+To verify database readiness from the browser or curl:
 ```bash
-# Run all test suites (Day 3, Day 4, Day 5, and Day 6 — 277 total tests)
-npm test
-
-# Run Day 3 frontend state & parameter parsing tests (34 tests)
-npm run test:day3
-
-# Run Day 4 backend architecture & SSRF validation tests (67 tests)
-npm run test:day4
-
-# Run Day 5 real HTTP execution & connection security tests (80 tests)
-npm run test:day5
-
-# Run Day 6 response viewer improvements & state tests (96 tests)
-npm run test:day6
+curl http://localhost:3000/api/health/db
 ```
 
-### Day 6 Test Coverage (Tests A through M — 96 Tests)
-- **TEST A**: Valid JSON formatting with 2-space indentation and full syntax highlighting tokenization (`json-key`, `json-string`, `json-number`, `json-boolean`, `json-null`, `json-punct`).
-- **TEST B**: Safe rendering and HTML-escaping to prevent XSS when response bodies contain `<script>`, `<img>`, or HTML tags.
-- **TEST C**: Graceful fallback when parsing malformed JSON payloads, displaying original raw text without crashing and setting `isMalformedJson: true`.
-- **TEST D**: Plain-text response display with correct status, time, size, and Content-Type metrics.
-- **TEST E**: Empty response handling for HTTP 204 No Content and 0-byte responses (`isEmpty: true`).
-- **TEST F**: Binary and unsupported media handling (`isBinary: true`), safe textual representation, and UI card preview suppression.
-- **TEST G**: Upstream non-2xx HTTP responses (`404 Not Found`, `500 Internal Server Error`) preserved as valid execution results rather than transport errors.
-- **TEST H**: Network error and request timeout states with status clearing, warning banner, and troubleshooting notes.
-- **TEST I**: Response metadata extraction (case-insensitive Content-Type) and consecutive request state resetting (`resetResponseViewer`).
-- **TEST J**: Copy Body logic with pretty/raw format selection, empty body detection, and Clipboard API fallback.
-- **TEST K**: Copy Headers formatting into RFC-compliant key-value text lines.
-- **TEST L**: End-to-end integration with local DevProbe execution engine and mock upstream server (`rawText` return contract).
-- **TEST M**: Regression checks ensuring Day 3, Day 4, and Day 5 exports and request state structures remain intact.
+## 🧪 Automated Testing
+
+DevProbe features a multi-tiered automated test suite with **426 passing tests** across 7 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, and database integration:
+
+```bash
+# Run all test suites (Day 3 through Day 9 — 426 total tests)
+npm test
+
+# Run individual test suites
+npm run test:day3    # Day 3: Frontend state & parameter parsing (34 tests)
+npm run test:day4    # Day 4: Backend validation & SSRF defense (36 tests)
+npm run test:day5    # Day 5: Real HTTP execution & socket pinning (44 tests)
+npm run test:day6    # Day 6: Response viewer & formatting states (118 tests)
+npm run test:day7    # Day 7: Error handling & security headers (62 tests)
+npm run test:day8    # Day 8: Security hardening & IPv6 edge cases (71 tests)
+npm run test:day9    # Day 9: MySQL database integration (61 tests)
+```
+
+### Day 9 Test Coverage (61 Tests)
+- **TEST A**: Database configuration defaults (`127.0.0.1:3306`, `devprobe_db`, `root`), integer parsing, and `process.env` overrides.
+- **TEST B**: Sanitized configuration masking and safe error translation without leaking passwords, file paths, or credentials (`ECONNREFUSED`, `ER_ACCESS_DENIED_ERROR`, `ER_BAD_DB_ERROR`).
+- **TEST C**: Connection pool singleton lifecycle (`getPool()`, `closePool()`, lazy re-creation).
+- **TEST D**: Deterministic mocked connectivity tests (successful ping, connection failure, malformed query response).
+- **TEST E**: Schema structure validation (`database/schema.sql` file existence, `collections`, `saved_requests`, primary keys, foreign keys with `ON DELETE SET NULL`, utf8mb4 collation, JSON columns, auto-timestamps).
+- **TEST F**: Parameterized query safety enforcement (rejects empty statements, enforces array parameters).
+- **TEST G**: HTTP health endpoints contract preservation:
+  - `GET /api/health` preserves existing liveness contract (`success: true`, `message: 'DevProbe server is running'`).
+  - `GET /api/health/db` reports database readiness (`200` connected / `503` disconnected) without leaking passwords.
+- **TEST H**: Live MySQL / XAMPP integration test (when MySQL is running, verifies real query execution and table existence on the server).
+
+### Database Troubleshooting
+
+| Error Code | Meaning | Solution |
+|---|---|---|
+| `ECONNREFUSED` | Database server refused connection | Start MySQL in XAMPP Control Panel and check that port 3306 is open. |
+| `ER_ACCESS_DENIED_ERROR` | Incorrect credentials | Check `DB_USER` and `DB_PASSWORD` in `.env`. Default XAMPP user is `root` with empty password. |
+| `ER_BAD_DB_ERROR` | Target database does not exist | Run `npm run db:init` to create `devprobe_db` and apply schema tables. |
+| `ETIMEDOUT` | Connection timed out | Verify `DB_HOST` is reachable (e.g. `127.0.0.1`). |
 
 ## 🗺️ Development Roadmap
 
-| Phase | Planned Work | Status |
+| Phase | Milestone | Status |
 |---|---|---|
 | Days 1–2 | Project setup and frontend workspace interface | Completed |
 | Days 3–4 | Request state management & backend validation architecture | Completed |
 | Days 5–6 | Real HTTP execution engine, SSRF defense & response inspector improvements | Completed |
-| Days 7–8 | Database schema and query optimization | Upcoming |
-| Days 9–12 | Collections, saved requests, authentication, and request history | Planned |
+| Days 7–8 | Advanced error handling, security hardening & response viewer clipping fix | Completed |
+| Day 9 | MySQL database connection pool, initial schema & health checks | Completed |
+| Days 10–12 | Collections, saved requests, authentication, and request history persistence | Planned |
 | Days 13–16 | Environment variables, automated tests, documentation, and final deployment | Planned |
 
 ## 👨‍💻 Developer
@@ -336,4 +428,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 6 complete. Response Viewer Improvements implemented with lightweight JSON syntax highlighting, safe XSS-free DOM rendering, Copy Body and Copy Headers with Clipboard API fallback, 7 distinct response states (JSON, text, 204/empty, malformed JSON, non-2xx, network/timeout, binary card), live metadata metrics, and comprehensive regression test suites. 277 automated tests passing.
+**In Active Development** — Day 9 complete. MySQL database integration foundation established with `mysql2/promise` connection pooling, environment configuration, initial relational schema (`collections`, `saved_requests`), safe error translation without credential leakage, database readiness endpoint (`GET /api/health/db`), and 426 automated tests passing with zero regressions.
