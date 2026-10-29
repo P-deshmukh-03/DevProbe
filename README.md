@@ -207,7 +207,7 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
 - **Description**: Validates request parameters and produces a normalized execution plan. **Does not perform any outbound network calls.**
 - **Status**: `200 OK`
 
-### 3. Real HTTP Request Execution
+### 4. Real HTTP Request Execution
 - **Route**: `POST /api/requests/execute`
 - **Description**: Safely executes an outbound HTTP/HTTPS request against the target API and returns real status, headers, body, and latency metrics.
 - **Request Headers**: `Content-Type: application/json`
@@ -249,6 +249,80 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
     }
   }
   ```
+
+### 5. Collections API (Day 10)
+- **List Collections**: `GET /api/collections`
+  - **Status**: `200 OK`
+  - **Response**:
+    ```json
+    {
+      "success": true,
+      "data": [
+        {
+          "id": 1,
+          "name": "Users API",
+          "description": "Endpoints for user management",
+          "created_at": "2026-10-29T14:00:00.000Z",
+          "updated_at": "2026-10-29T14:00:00.000Z"
+        }
+      ]
+    }
+    ```
+- **Create Collection**: `POST /api/collections`
+  - **Status**: `201 Created`
+  - **Body**: `{ "name": "Auth API", "description": "Optional notes" }`
+  - **Validation**: Requires non-empty string name between 1 and 255 characters.
+
+- **Retrieve Collection by ID**: `GET /api/collections/:id`
+  - **Status**: `200 OK` or `404 Not Found`
+
+### 6. Saved Requests API (Day 10)
+- **List Saved Requests**: `GET /api/requests/saved`
+  - **Query Filter**: Optional `?collectionId=<id>` to retrieve requests belonging to a specific collection.
+  - **Status**: `200 OK`
+  - **Response**:
+    ```json
+    {
+      "success": true,
+      "data": [
+        {
+          "id": 1,
+          "collection_id": 1,
+          "name": "Get User Profile",
+          "method": "GET",
+          "url": "https://jsonplaceholder.typicode.com/users/1",
+          "headers": [{ "key": "Accept", "value": "application/json", "enabled": true }],
+          "params": [{ "key": "active", "value": "true", "enabled": true }],
+          "body": null,
+          "body_type": "none",
+          "auth_type": "bearer",
+          "created_at": "2026-10-29T14:05:00.000Z",
+          "updated_at": "2026-10-29T14:05:00.000Z"
+        }
+      ]
+    }
+    ```
+
+- **Create Saved Request**: `POST /api/requests/saved`
+  - **Status**: `201 Created`
+  - **Example Request Body**:
+    ```json
+    {
+      "name": "Create Post Item",
+      "collection_id": 1,
+      "method": "POST",
+      "url": "https://jsonplaceholder.typicode.com/posts",
+      "headers": [{ "key": "Accept", "value": "application/json" }],
+      "params": [],
+      "body": "{\"title\":\"My Post\"}",
+      "body_type": "json",
+      "auth": { "type": "bearer", "bearerToken": "secret-token-will-be-stripped" }
+    }
+    ```
+  - **Strict Secret Protection Policy**: Plaintext bearer tokens, basic passwords, cookies, and `Authorization` headers are **purged** prior to persistence. Only safe metadata (`auth_type`) is saved to MySQL.
+
+- **Retrieve Saved Request by ID**: `GET /api/requests/saved/:id`
+  - **Status**: `200 OK` or `404 Not Found`
 
 ### 4. Execution Error Response Format
 When destination validation fails or limits are exceeded, a structured error is returned:
@@ -372,33 +446,36 @@ curl http://localhost:3000/api/health/db
 
 ## 🧪 Automated Testing
 
-DevProbe features a multi-tiered automated test suite with **426 passing tests** across 7 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, and database integration:
+DevProbe features a multi-tiered automated test suite with **517 passing tests** across 8 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections, and saved requests persistence:
 
 ```bash
-# Run all test suites (Day 3 through Day 9 — 426 total tests)
+# Run all test suites (Day 3 through Day 10 — 517 total tests)
 npm test
 
 # Run individual test suites
 npm run test:day3    # Day 3: Frontend state & parameter parsing (34 tests)
-npm run test:day4    # Day 4: Backend validation & SSRF defense (36 tests)
-npm run test:day5    # Day 5: Real HTTP execution & socket pinning (44 tests)
-npm run test:day6    # Day 6: Response viewer & formatting states (118 tests)
-npm run test:day7    # Day 7: Error handling & security headers (62 tests)
+npm run test:day4    # Day 4: Backend validation & SSRF defense (67 tests)
+npm run test:day5    # Day 5: Real HTTP execution & socket pinning (68 tests)
+npm run test:day6    # Day 6: Response viewer & formatting states (65 tests)
+npm run test:day7    # Day 7: Error handling & security headers (63 tests)
 npm run test:day8    # Day 8: Security hardening & IPv6 edge cases (71 tests)
 npm run test:day9    # Day 9: MySQL database integration (61 tests)
+npm run test:day10   # Day 10: Collections & saved requests persistence (88 tests)
 ```
 
-### Day 9 Test Coverage (61 Tests)
-- **TEST A**: Database configuration defaults (`127.0.0.1:3306`, `devprobe_db`, `root`), integer parsing, and `process.env` overrides.
-- **TEST B**: Sanitized configuration masking and safe error translation without leaking passwords, file paths, or credentials (`ECONNREFUSED`, `ER_ACCESS_DENIED_ERROR`, `ER_BAD_DB_ERROR`).
-- **TEST C**: Connection pool singleton lifecycle (`getPool()`, `closePool()`, lazy re-creation).
-- **TEST D**: Deterministic mocked connectivity tests (successful ping, connection failure, malformed query response).
-- **TEST E**: Schema structure validation (`database/schema.sql` file existence, `collections`, `saved_requests`, primary keys, foreign keys with `ON DELETE SET NULL`, utf8mb4 collation, JSON columns, auto-timestamps).
-- **TEST F**: Parameterized query safety enforcement (rejects empty statements, enforces array parameters).
-- **TEST G**: HTTP health endpoints contract preservation:
-  - `GET /api/health` preserves existing liveness contract (`success: true`, `message: 'DevProbe server is running'`).
-  - `GET /api/health/db` reports database readiness (`200` connected / `503` disconnected) without leaking passwords.
-- **TEST H**: Live MySQL / XAMPP integration test (when MySQL is running, verifies real query execution and table existence on the server).
+### Day 10 Test Coverage (88 Tests)
+- **TEST A**: Collection validation (rejects missing names, whitespace-only names, strings exceeding 255 characters).
+- **TEST B**: Collection creation (`201 Created`), listing (`GET /api/collections`), ID retrieval, and 404 handling.
+- **TEST C**: Saved request validation (missing names, empty strings, unsupported HTTP methods, malformed URLs, non-HTTP protocols, embedded credentials in URL, nonexistent `collection_id`).
+- **TEST D**: Saved request creation (`201 Created`), foreign key association to collections, and unassigned request persistence (`collection_id: null`).
+- **TEST E**: Saved requests listing, filtering by `?collectionId=`, single record retrieval, and 400/404 handling.
+- **TEST F**: **Strict Authentication & Secret Protection**:
+  - `Authorization: Bearer <token>` and `Cookie` headers are stripped from saved headers.
+  - Plaintext `bearerToken` and `basicPassword` are strictly purged; only safe `auth_type` metadata is stored.
+  - Direct MySQL verification confirms secret tokens never touch the database.
+- **TEST G**: Parameterized SQL execution & injection resistance (`' OR '1'='1'`, `DROP TABLE`, `UNION SELECT` safely treated as string literals).
+- **TEST H**: Safe database error handling (readiness check does not expose passwords, errors formatted securely).
+- **TEST I**: Frontend non-dispatch verification (`convertSavedRequestToTemplate` and `loadRequestIntoState` safely populate the workspace editor and state without triggering outbound HTTP execution).
 
 ### Database Troubleshooting
 
@@ -418,7 +495,8 @@ npm run test:day9    # Day 9: MySQL database integration (61 tests)
 | Days 5–6 | Real HTTP execution engine, SSRF defense & response inspector improvements | Completed |
 | Days 7–8 | Advanced error handling, security hardening & response viewer clipping fix | Completed |
 | Day 9 | MySQL database connection pool, initial schema & health checks | Completed |
-| Days 10–12 | Collections, saved requests, authentication, and request history persistence | Planned |
+| Day 10 | Collections and saved requests persistence with secret credential protection | Completed |
+| Days 11–12 | Authentication headers, environments & request history persistence | Planned |
 | Days 13–16 | Environment variables, automated tests, documentation, and final deployment | Planned |
 
 ## 👨‍💻 Developer
@@ -428,4 +506,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 9 complete. MySQL database integration foundation established with `mysql2/promise` connection pooling, environment configuration, initial relational schema (`collections`, `saved_requests`), safe error translation without credential leakage, database readiness endpoint (`GET /api/health/db`), and 426 automated tests passing with zero regressions.
+**In Active Development** — Day 10 complete. Persistent MySQL collections and saved requests implemented with `GET`/`POST /api/collections` and `GET`/`POST /api/requests/saved`, collection filtering, secret credential protection (purging passwords, bearer tokens, and session cookies), interactive workspace dialogs, safe request loading without execution dispatch, and 517 automated tests passing with zero regressions.

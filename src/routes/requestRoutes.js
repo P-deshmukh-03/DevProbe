@@ -7,7 +7,14 @@
 const express = require('express');
 const router = express.Router();
 const requestController = require('../controllers/requestController');
+const savedRequestRoutes = require('./savedRequestRoutes');
 const { validateRequestPayload } = require('../middleware/validateRequest');
+
+/**
+ * Day 10: Saved Requests Persistence Endpoints
+ * /api/requests/saved
+ */
+router.use('/saved', savedRequestRoutes);
 
 /**
  * POST /api/requests/validate

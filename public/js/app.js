@@ -1070,7 +1070,10 @@ if (typeof document !== 'undefined') {
   // 8. Response viewer toolbar (copy, pretty/raw)
   initResponseViewer();
 
-  // 9. Initial state render
+  // 9. Collections & Saved Requests persistence (Day 10)
+  initPersistentCollections();
+
+  // 10. Initial state render
   renderActiveRequestToUI();
   });
 }
@@ -1307,11 +1310,11 @@ function initSidebar() {
   const searchInput = document.getElementById('sidebar-search');
   const btnClearSearch = document.getElementById('btn-clear-search');
   const noResultsMsg = document.getElementById('no-filter-results');
-  const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
 
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       const query = searchInput.value.toLowerCase().trim();
+      const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
 
       if (query.length > 0) {
         if (btnClearSearch) btnClearSearch.classList.remove('hidden');
@@ -1346,6 +1349,7 @@ function initSidebar() {
       btnClearSearch.addEventListener('click', () => {
         searchInput.value = '';
         btnClearSearch.classList.add('hidden');
+        const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
         requestButtons.forEach((btn) => (btn.style.display = 'flex'));
         if (noResultsMsg) noResultsMsg.classList.add('hidden');
         searchInput.focus();
@@ -2446,18 +2450,6 @@ function initActionButtons() {
     btnSend.addEventListener('click', handleSendRequest);
   }
 
-  // Save Button
-  const btnSave = document.getElementById('btn-save-request');
-  if (btnSave) {
-    btnSave.addEventListener('click', () => {
-      showToast(
-        'Saving Functionality Coming Soon',
-        'Database-backed collection and request persistence is planned for Day 9.',
-        'warning'
-      );
-    });
-  }
-
   // New Request in Sidebar & New Tab Button
   const btnSidebarNew = document.getElementById('btn-sidebar-new-request');
   const btnNewTab = document.getElementById('btn-new-tab');
@@ -2485,14 +2477,6 @@ function initActionButtons() {
     btnCloseTab.addEventListener('click', (e) => {
       e.stopPropagation();
       resetToNewRequest();
-    });
-  }
-
-  // New Collection Button
-  const btnNewCollection = document.getElementById('btn-new-collection');
-  if (btnNewCollection) {
-    btnNewCollection.addEventListener('click', () => {
-      showToast('Collections Management', 'Creating custom collections will be enabled alongside persistent storage in Day 9.', 'info');
     });
   }
 
@@ -2615,6 +2599,436 @@ function initResponseViewer() {
 }
 
 /* ==========================================================================
+   10. Collections & Saved Requests Persistence (Day 10)
+   ========================================================================== */
+
+let cachedCollections = [];
+let cachedSavedRequests = [];
+
+/**
+ * Converts a database saved request row into the editor template format.
+ * Strictly guarantees that sensitive credentials are never injected.
+ */
+function convertSavedRequestToTemplate(savedReq) {
+  if (!savedReq) return null;
+
+  let headers = [];
+  if (Array.isArray(savedReq.headers)) {
+    headers = savedReq.headers.map((h) => ({
+      key: h.key || '',
+      value: h.value || '',
+      description: h.description || '',
+      enabled: h.enabled !== false
+    }));
+  } else if (savedReq.headers && typeof savedReq.headers === 'object') {
+    headers = Object.entries(savedReq.headers).map(([k, v]) => ({
+      key: k,
+      value: typeof v === 'string' ? v : String(v),
+      description: '',
+      enabled: true
+    }));
+  }
+
+  let params = [];
+  if (Array.isArray(savedReq.params)) {
+    params = savedReq.params.map((p) => ({
+      key: p.key || '',
+      value: p.value || '',
+      description: p.description || '',
+      enabled: p.enabled !== false
+    }));
+  } else if (savedReq.params && typeof savedReq.params === 'object') {
+    params = Object.entries(savedReq.params).map(([k, v]) => ({
+      key: k,
+      value: typeof v === 'string' ? v : String(v),
+      description: '',
+      enabled: true
+    }));
+  }
+
+  return {
+    name: savedReq.name || 'Saved Request',
+    method: savedReq.method || 'GET',
+    url: savedReq.url || '',
+    headers: headers.length > 0 ? headers : [{ id: generateRowId('hdr'), key: 'Accept', value: 'application/json', description: 'Expected format', enabled: true }],
+    params: params.length > 0 ? params : [{ id: generateRowId('param'), key: '', value: '', description: '', enabled: false }],
+    body: {
+      type: savedReq.body_type || 'none',
+      text: savedReq.body || ''
+    },
+    auth: {
+      type: savedReq.auth_type || 'none',
+      bearerToken: '',
+      basicUsername: '',
+      basicPassword: ''
+    }
+  };
+}
+
+/**
+ * Loads collections and saved requests from the backend API and renders them in the sidebar.
+ */
+async function loadCollectionsAndSavedRequests() {
+  if (typeof document === 'undefined') return;
+
+  const container = document.getElementById('custom-collections-container');
+  const collectionSelect = document.getElementById('select-save-collection');
+
+  try {
+    const [colRes, reqRes] = await Promise.all([
+      fetch('/api/collections'),
+      fetch('/api/requests/saved')
+    ]);
+
+    const colData = await colRes.json();
+    const reqData = await reqRes.json();
+
+    if (colData.success && Array.isArray(colData.data)) {
+      cachedCollections = colData.data;
+    }
+    if (reqData.success && Array.isArray(reqData.data)) {
+      cachedSavedRequests = reqData.data;
+    }
+
+    // Update collection dropdown in Save Modal
+    if (collectionSelect) {
+      collectionSelect.innerHTML = '<option value="">-- No Collection (Unassigned) --</option>';
+      cachedCollections.forEach((c) => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.name;
+        collectionSelect.appendChild(opt);
+      });
+    }
+
+    // Render collections and saved requests in sidebar
+    if (container) {
+      container.innerHTML = '';
+
+      if (cachedCollections.length === 0 && cachedSavedRequests.length === 0) {
+        return;
+      }
+
+      // Render each collection folder
+      cachedCollections.forEach((col) => {
+        const colRequests = cachedSavedRequests.filter((r) => r.collection_id === col.id);
+
+        const folderEl = document.createElement('div');
+        folderEl.className = 'collection-folder open';
+        folderEl.setAttribute('data-collection-id', col.id);
+
+        const headerEl = document.createElement('div');
+        headerEl.className = 'folder-header';
+        headerEl.setAttribute('role', 'button');
+        headerEl.setAttribute('tabindex', '0');
+        headerEl.setAttribute('aria-expanded', 'true');
+        headerEl.innerHTML = `
+          <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+          <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="folder-title">${escapeHtml(col.name)}</span>
+          <span class="folder-badge" title="${colRequests.length} saved requests">${colRequests.length}</span>
+        `;
+
+        headerEl.addEventListener('click', () => {
+          const isCollapsed = folderEl.classList.toggle('collapsed');
+          headerEl.setAttribute('aria-expanded', (!isCollapsed).toString());
+        });
+
+        const itemsEl = document.createElement('div');
+        itemsEl.className = 'folder-items';
+
+        if (colRequests.length === 0) {
+          const emptyEl = document.createElement('div');
+          emptyEl.className = 'custom-collection-empty';
+          emptyEl.textContent = 'No requests in this collection';
+          itemsEl.appendChild(emptyEl);
+        } else {
+          colRequests.forEach((req) => {
+            const btn = document.createElement('button');
+            btn.className = 'request-item';
+            btn.setAttribute('data-id', `saved-${req.id}`);
+            btn.setAttribute('data-saved-id', req.id);
+            btn.setAttribute('data-method', req.method);
+            btn.setAttribute('data-name', req.name);
+            btn.setAttribute('data-url', req.url);
+
+            const mLower = req.method.toLowerCase();
+            btn.innerHTML = `
+              <span class="method-badge method-${mLower}">${escapeHtml(req.method)}</span>
+              <span class="request-name">${escapeHtml(req.name)}</span>
+            `;
+
+            btn.addEventListener('click', () => {
+              document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
+              btn.classList.add('active');
+
+              // Populate request editor without executing outbound HTTP
+              const template = convertSavedRequestToTemplate(req);
+              loadRequestIntoState(template);
+              resetResponseViewer();
+              updateUrlPreview();
+
+              showToast('Request Selected', `Loaded "${req.name}" into workspace.`, 'info');
+            });
+
+            itemsEl.appendChild(btn);
+          });
+        }
+
+        folderEl.appendChild(headerEl);
+        folderEl.appendChild(itemsEl);
+        container.appendChild(folderEl);
+      });
+
+      // Render unassigned saved requests if any exist
+      const unassignedRequests = cachedSavedRequests.filter((r) => !r.collection_id);
+      if (unassignedRequests.length > 0) {
+        const unassignedFolder = document.createElement('div');
+        unassignedFolder.className = 'collection-folder open';
+        unassignedFolder.innerHTML = `
+          <div class="folder-header" role="button" tabindex="0" aria-expanded="true">
+            <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+            <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            </svg>
+            <span class="folder-title">Saved Requests</span>
+            <span class="folder-badge">${unassignedRequests.length}</span>
+          </div>
+        `;
+        const unassignedItems = document.createElement('div');
+        unassignedItems.className = 'folder-items';
+
+        unassignedRequests.forEach((req) => {
+          const btn = document.createElement('button');
+          btn.className = 'request-item';
+          btn.setAttribute('data-id', `saved-${req.id}`);
+          btn.setAttribute('data-saved-id', req.id);
+          btn.setAttribute('data-method', req.method);
+          btn.setAttribute('data-name', req.name);
+          btn.setAttribute('data-url', req.url);
+
+          const mLower = req.method.toLowerCase();
+          btn.innerHTML = `
+            <span class="method-badge method-${mLower}">${escapeHtml(req.method)}</span>
+            <span class="request-name">${escapeHtml(req.name)}</span>
+          `;
+
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const template = convertSavedRequestToTemplate(req);
+            loadRequestIntoState(template);
+            resetResponseViewer();
+            updateUrlPreview();
+
+            showToast('Request Selected', `Loaded "${req.name}" into workspace.`, 'info');
+          });
+
+          unassignedItems.appendChild(btn);
+        });
+
+        const unassignedHeader = unassignedFolder.querySelector('.folder-header');
+        unassignedHeader.addEventListener('click', () => {
+          const isCollapsed = unassignedFolder.classList.toggle('collapsed');
+          unassignedHeader.setAttribute('aria-expanded', (!isCollapsed).toString());
+        });
+
+        unassignedFolder.appendChild(unassignedItems);
+        container.appendChild(unassignedFolder);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load collections and requests:', err);
+  }
+}
+
+/**
+ * Initializes dialogs and handlers for creating collections and saving requests.
+ */
+function initPersistentCollections() {
+  if (typeof document === 'undefined') return;
+
+  // New Collection Modal elements
+  const modalCol = document.getElementById('modal-new-collection');
+  const btnNewCol = document.getElementById('btn-new-collection');
+  const btnColClose = document.getElementById('btn-col-modal-close');
+  const btnColCancel = document.getElementById('btn-col-modal-cancel');
+  const formNewCol = document.getElementById('form-new-collection');
+  const inputColName = document.getElementById('input-col-name');
+  const inputColDesc = document.getElementById('input-col-desc');
+  const btnColSubmit = document.getElementById('btn-col-modal-submit');
+
+  const openColModal = () => {
+    if (modalCol) {
+      if (inputColName) inputColName.value = '';
+      if (inputColDesc) inputColDesc.value = '';
+      modalCol.classList.add('active');
+      if (inputColName) inputColName.focus();
+    }
+  };
+
+  const closeColModal = () => {
+    if (modalCol) modalCol.classList.remove('active');
+  };
+
+  if (btnNewCol) btnNewCol.addEventListener('click', openColModal);
+  if (btnColClose) btnColClose.addEventListener('click', closeColModal);
+  if (btnColCancel) btnColCancel.addEventListener('click', closeColModal);
+
+  if (modalCol) {
+    modalCol.addEventListener('click', (e) => {
+      if (e.target === modalCol) closeColModal();
+    });
+  }
+
+  if (formNewCol) {
+    formNewCol.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = (inputColName?.value || '').trim();
+      const desc = (inputColDesc?.value || '').trim();
+
+      if (!name) {
+        showToast('Validation Error', 'Collection name is required.', 'warning');
+        return;
+      }
+
+      if (btnColSubmit) btnColSubmit.disabled = true;
+
+      try {
+        const res = await fetch('/api/collections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description: desc || null })
+        });
+        const data = await res.json();
+
+        if (res.status === 201 && data.success) {
+          closeColModal();
+          showToast('Collection Created', `Created collection "${data.data.name}".`, 'success');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to create collection';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        if (btnColSubmit) btnColSubmit.disabled = false;
+      }
+    });
+  }
+
+  // Save Request Modal elements
+  const modalSave = document.getElementById('modal-save-request');
+  const btnSave = document.getElementById('btn-save-request');
+  const btnSaveClose = document.getElementById('btn-save-modal-close');
+  const btnSaveCancel = document.getElementById('btn-save-modal-cancel');
+  const formSave = document.getElementById('form-save-request');
+  const inputSaveName = document.getElementById('input-save-name');
+  const selectSaveCol = document.getElementById('select-save-collection');
+  const btnSaveSubmit = document.getElementById('btn-save-modal-submit');
+
+  const openSaveModal = () => {
+    if (modalSave) {
+      if (inputSaveName) inputSaveName.value = activeRequest.name || 'My Request';
+      modalSave.classList.add('active');
+      if (inputSaveName) inputSaveName.focus();
+    }
+  };
+
+  const closeSaveModal = () => {
+    if (modalSave) modalSave.classList.remove('active');
+  };
+
+  if (btnSave) {
+    btnSave.addEventListener('click', openSaveModal);
+  }
+
+  if (btnSaveClose) btnSaveClose.addEventListener('click', closeSaveModal);
+  if (btnSaveCancel) btnSaveCancel.addEventListener('click', closeSaveModal);
+
+  if (modalSave) {
+    modalSave.addEventListener('click', (e) => {
+      if (e.target === modalSave) closeSaveModal();
+    });
+  }
+
+  if (formSave) {
+    formSave.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const reqName = (inputSaveName?.value || '').trim();
+      const colIdVal = selectSaveCol?.value;
+      const collection_id = colIdVal ? parseInt(colIdVal, 10) : null;
+
+      if (!reqName) {
+        showToast('Validation Error', 'Request name is required.', 'warning');
+        return;
+      }
+
+      if (btnSaveSubmit) btnSaveSubmit.disabled = true;
+
+      // Extract current active request state
+      const payload = {
+        name: reqName,
+        collection_id: collection_id,
+        method: activeRequest.method || 'GET',
+        url: activeRequest.url || '',
+        headers: Array.isArray(activeRequest.headers) ? activeRequest.headers : [],
+        params: Array.isArray(activeRequest.params) ? activeRequest.params : [],
+        body: activeRequest.body ? activeRequest.body.text : '',
+        body_type: activeRequest.body ? activeRequest.body.type : 'none',
+        auth_type: activeRequest.auth ? activeRequest.auth.type : 'none'
+      };
+
+      try {
+        const res = await fetch('/api/requests/saved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (res.status === 201 && data.success) {
+          activeRequest.name = reqName;
+          const tabTitle = document.getElementById('tab-title-label');
+          if (tabTitle) tabTitle.textContent = reqName;
+
+          closeSaveModal();
+          showToast('Request Saved', `Successfully saved "${data.data.name}".`, 'success');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to save request';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        if (btnSaveSubmit) btnSaveSubmit.disabled = false;
+      }
+    });
+  }
+
+  // Keyboard shortcut: Escape closes active modals
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeColModal();
+      closeSaveModal();
+    }
+  });
+
+  // Initial load of collections and saved requests
+  loadCollectionsAndSavedRequests();
+}
+
+/* ==========================================================================
    9. Testing and Module Compatibility Export
    ========================================================================== */
 
@@ -2649,7 +3063,12 @@ if (typeof window !== 'undefined') {
     highlightJsonToHtml,
     formatHeadersForCopy,
     copyTextToClipboard,
-    showToast
+    showToast,
+    convertSavedRequestToTemplate,
+    loadCollectionsAndSavedRequests,
+    initPersistentCollections,
+    getCachedCollections: () => cachedCollections,
+    getCachedSavedRequests: () => cachedSavedRequests
   };
 }
 
@@ -2683,7 +3102,12 @@ if (typeof module !== 'undefined' && module.exports) {
     highlightJsonToHtml,
     formatHeadersForCopy,
     copyTextToClipboard,
-    showToast
+    showToast,
+    convertSavedRequestToTemplate,
+    loadCollectionsAndSavedRequests,
+    initPersistentCollections,
+    getCachedCollections: () => cachedCollections,
+    getCachedSavedRequests: () => cachedSavedRequests
   };
 }
 

@@ -4,6 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const requestRoutes = require('./routes/requestRoutes');
+const collectionRoutes = require('./routes/collectionRoutes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { EXECUTION_LIMITS } = require('./config/security');
 const { checkDatabaseHealth, closePool } = require('./config/database');
@@ -58,7 +59,8 @@ app.get('/api/health/db', async (req, res) => {
   }
 });
 
-// API Routes
+// API Routes (Days 4–10)
+app.use('/api/collections', collectionRoutes);
 app.use('/api/requests', requestRoutes);
 
 // Homepage route

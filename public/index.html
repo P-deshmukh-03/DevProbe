@@ -156,6 +156,10 @@
                 </button>
               </div>
             </div>
+
+            <!-- Custom Collections Container (Day 10: Persistent MySQL Collections) -->
+            <div id="custom-collections-container"></div>
+
             <div id="no-filter-results" class="sidebar-empty-filter hidden">
               No matching requests found
             </div>
@@ -632,6 +636,72 @@
         </span>
       </div>
     </footer>
+
+    <!-- Day 10 Modal: Create Collection -->
+    <div id="modal-new-collection" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-col-title">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-col-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span>Create New Collection</span>
+          </div>
+          <button class="modal-close" id="btn-col-modal-close" aria-label="Close dialog">&times;</button>
+        </div>
+        <form id="form-new-collection">
+          <div class="modal-body">
+            <div class="modal-form-group">
+              <label for="input-col-name" class="modal-label">Collection Name *</label>
+              <input type="text" id="input-col-name" class="modal-input" placeholder="e.g. Users API, Auth Endpoints" required maxlength="255" autocomplete="off">
+            </div>
+            <div class="modal-form-group">
+              <label for="input-col-desc" class="modal-label">Description (Optional)</label>
+              <textarea id="input-col-desc" class="modal-textarea" placeholder="Optional notes about this collection..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="modal-btn modal-btn-cancel" id="btn-col-modal-cancel">Cancel</button>
+            <button type="submit" class="modal-btn modal-btn-primary" id="btn-col-modal-submit">Create Collection</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Day 10 Modal: Save Request -->
+    <div id="modal-save-request" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-save-title">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-save-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            <span>Save Request</span>
+          </div>
+          <button class="modal-close" id="btn-save-modal-close" aria-label="Close dialog">&times;</button>
+        </div>
+        <form id="form-save-request">
+          <div class="modal-body">
+            <div class="modal-form-group">
+              <label for="input-save-name" class="modal-label">Request Name *</label>
+              <input type="text" id="input-save-name" class="modal-input" placeholder="e.g. Get User 1, Create Account" required maxlength="255" autocomplete="off">
+            </div>
+            <div class="modal-form-group">
+              <label for="select-save-collection" class="modal-label">Destination Collection</label>
+              <select id="select-save-collection" class="modal-select">
+                <option value="">-- No Collection (Unassigned) --</option>
+              </select>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="modal-btn modal-btn-cancel" id="btn-save-modal-cancel">Cancel</button>
+            <button type="submit" class="modal-btn modal-btn-primary" id="btn-save-modal-submit">Save to Collection</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container" aria-live="polite"></div>
