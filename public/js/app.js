@@ -52,24 +52,59 @@ const ENVIRONMENTS = {
 
 /**
  * Look up an environment variable by name in a specified environment.
- * @param {string} envKey - The environment key ('none'|'dev'|'staging'|'prod')
+ * Supports both predefined in-memory maps and dynamic database-backed environments.
+ * Treats disabled variables (is_enabled: false) as unavailable.
+ *
+ * @param {string|number} envKey - The environment key ('none'|'dev'|'staging'|'prod'|numeric ID)
  * @param {string} varName - The variable name to look up
- * @returns {string|undefined} The resolved variable value or undefined if not found
+ * @returns {string|undefined} The resolved variable value or undefined if not found/disabled
  */
 function getEnvironmentVariable(envKey, varName) {
-  if (!envKey || !ENVIRONMENTS[envKey]) return undefined;
+  if (!envKey || envKey === 'none' || !varName) return undefined;
   const env = ENVIRONMENTS[envKey];
-  if (env.variables && Object.prototype.hasOwnProperty.call(env.variables, varName)) {
-    return env.variables[varName];
+  if (!env || !env.variables) return undefined;
+
+  // Case 1: Variables is an Array of records (e.g. from MySQL database)
+  if (Array.isArray(env.variables)) {
+    const lowerVar = varName.toLowerCase();
+    const found = env.variables.find(v => {
+      const k = v.key || v.var_key;
+      return k && String(k).toLowerCase() === lowerVar;
+    });
+
+    if (found) {
+      // Disabled variables are treated as unavailable
+      if (found.is_enabled === false) {
+        return undefined;
+      }
+      return found.value !== undefined && found.value !== null ? String(found.value) : '';
+    }
+    return undefined;
   }
+
+  // Case 2: Variables is a key-value dictionary (predefined environments dev/staging/prod)
+  if (typeof env.variables === 'object') {
+    if (Object.prototype.hasOwnProperty.call(env.variables, varName)) {
+      return env.variables[varName];
+    }
+    // Case-insensitive lookup fallback
+    const lower = varName.toLowerCase();
+    for (const [k, val] of Object.entries(env.variables)) {
+      if (k.toLowerCase() === lower) {
+        return val;
+      }
+    }
+  }
+
   return undefined;
 }
 
 /**
  * Replaces {{variable_name}} placeholders in a string using the selected environment.
  * Reports missing variables without silently converting them to empty strings.
+ *
  * @param {string} input - The string containing {{variable}} placeholders
- * @param {string} envKey - The active environment key
+ * @param {string|number} envKey - The active environment key or ID
  * @returns {{ resolvedText: string, missingVariables: string[], substituted: boolean }}
  */
 function resolveVariables(input, envKey) {
@@ -80,8 +115,8 @@ function resolveVariables(input, envKey) {
   const missingVariables = [];
   let substituted = false;
 
-  // Regex pattern matching {{var_name}}
-  const placeholderRegex = /\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}/g;
+  // Regex pattern matching {{var_name}}, {{base_url}}, {{api.key}}, etc.
+  const placeholderRegex = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
 
   const resolvedText = input.replace(placeholderRegex, (match, varName) => {
     const val = getEnvironmentVariable(envKey, varName);
@@ -89,7 +124,7 @@ function resolveVariables(input, envKey) {
       substituted = true;
       return val;
     }
-    // Variable is missing in this environment
+    // Variable is missing or disabled in this environment
     if (!missingVariables.includes(varName)) {
       missingVariables.push(varName);
     }
@@ -101,6 +136,147 @@ function resolveVariables(input, envKey) {
     resolvedText,
     missingVariables,
     substituted
+  };
+}
+
+/**
+ * Fully resolves variables across URL, query params, headers, body, and auth fields
+ * on a CLONED execution payload immediately before outbound execution.
+ * Preserves the original editor state and templates completely.
+ *
+ * @param {object} req - Request state (e.g. activeRequest)
+ * @param {string|number} envKey - Active environment key or ID
+ * @returns {{ isValid: boolean, executionPayload?: object, missingVariables?: string[], error?: string }}
+ */
+function resolveEntireRequest(req, envKey = 'none') {
+  if (!req || typeof req !== 'object') {
+    return { isValid: false, error: 'Invalid request configuration' };
+  }
+
+  const missingVariables = [];
+
+  // 1. Resolve URL and query params
+  const preparedUrl = prepareRequestUrl(req.url, req.params, envKey);
+  if (!preparedUrl.isValid) {
+    if (preparedUrl.missingVariables) {
+      preparedUrl.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+    }
+    return {
+      isValid: false,
+      missingVariables,
+      error: preparedUrl.error || 'Invalid URL configuration'
+    };
+  }
+
+  // 2. Resolve Headers (both key and value)
+  const resolvedHeaders = {};
+  const seenHeaderKeys = new Set();
+
+  if (Array.isArray(req.headers)) {
+    for (const h of req.headers) {
+      if (!h || !h.enabled) continue;
+      if (typeof h.key !== 'string' || !h.key.trim()) continue;
+
+      const keyRes = resolveVariables(h.key.trim(), envKey);
+      keyRes.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+
+      const rawVal = h.value !== undefined && h.value !== null ? String(h.value) : '';
+      const valRes = resolveVariables(rawVal, envKey);
+      valRes.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+
+      const finalKey = keyRes.resolvedText.trim();
+      const lowerKey = finalKey.toLowerCase();
+
+      if (seenHeaderKeys.has(lowerKey)) {
+        return {
+          isValid: false,
+          missingVariables,
+          error: `Duplicate header '${finalKey}' detected after variable resolution.`
+        };
+      }
+      seenHeaderKeys.add(lowerKey);
+      resolvedHeaders[finalKey] = valRes.resolvedText;
+    }
+  }
+
+  // 3. Resolve Request Body
+  let resolvedBody = null;
+  if (req.body && (req.body.type === 'json' || req.body.type === 'text') && req.body.text) {
+    const bodyRes = resolveVariables(req.body.text, envKey);
+    bodyRes.missingVariables.forEach(v => {
+      if (!missingVariables.includes(v)) missingVariables.push(v);
+    });
+
+    resolvedBody = bodyRes.resolvedText;
+
+    if (req.body.type === 'json' && resolvedBody.trim()) {
+      try {
+        JSON.parse(resolvedBody);
+      } catch (jsonErr) {
+        return {
+          isValid: false,
+          missingVariables,
+          error: `Resolved JSON body syntax error: ${jsonErr.message}`
+        };
+      }
+    }
+  }
+
+  // 4. Resolve Auth Credentials
+  let resolvedAuth = null;
+  if (req.auth && req.auth.type && req.auth.type !== 'none') {
+    resolvedAuth = { type: req.auth.type };
+
+    if (req.auth.type === 'bearer') {
+      const rawToken = req.auth.bearerToken || '';
+      const tokenRes = resolveVariables(rawToken, envKey);
+      tokenRes.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+      resolvedAuth.bearerToken = tokenRes.resolvedText;
+    } else if (req.auth.type === 'basic') {
+      const rawUser = req.auth.basicUsername || '';
+      const rawPass = req.auth.basicPassword || '';
+
+      const userRes = resolveVariables(rawUser, envKey);
+      userRes.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+
+      const passRes = resolveVariables(rawPass, envKey);
+      passRes.missingVariables.forEach(v => {
+        if (!missingVariables.includes(v)) missingVariables.push(v);
+      });
+
+      resolvedAuth.basicUsername = userRes.resolvedText;
+      resolvedAuth.basicPassword = passRes.resolvedText;
+    }
+  }
+
+  // If any unresolved variables were found across any request part
+  if (missingVariables.length > 0) {
+    return {
+      isValid: false,
+      missingVariables,
+      error: `Cannot execute request: unresolved environment variable(s) {{${missingVariables.join('}}, {{')}}}. Please define them in your active environment or select an environment.`
+    };
+  }
+
+  return {
+    isValid: true,
+    executionPayload: {
+      method: req.method,
+      url: preparedUrl.url,
+      headers: resolvedHeaders,
+      body: resolvedBody,
+      auth: resolvedAuth
+    }
   };
 }
 
@@ -1073,7 +1249,10 @@ if (typeof document !== 'undefined') {
   // 9. Collections & Saved Requests persistence (Day 10)
   initPersistentCollections();
 
-  // 10. Initial state render
+  // 10. Environment Management & Variables (Day 12)
+  initEnvironmentManagement();
+
+  // 11. Initial state render
   renderActiveRequestToUI();
   });
 }
@@ -2297,17 +2476,12 @@ async function handleSendRequest() {
     return;
   }
 
-  // 2. Validate Target URL & Environment Variables
-  const prepared = prepareRequestUrl(
-    activeRequest.url,
-    activeRequest.params,
-    activeRequest.selectedEnvironment
-  );
-
-  if (!prepared.isValid) {
+  // 2. Resolve entire request on cloned payload (URL, params, headers, body, auth)
+  const resolved = resolveEntireRequest(activeRequest, activeRequest.selectedEnvironment);
+  if (!resolved.isValid) {
     setUrlInputError(true);
-    renderResponseError(prepared.error || 'Please check your URL configuration.', 'INVALID_URL');
-    showToast('Cannot Send Request', prepared.error || 'Please check your URL configuration.', 'warning');
+    renderResponseError(resolved.error || 'Please check your URL and environment configuration.', 'UNRESOLVED_VARIABLE');
+    showToast('Cannot Send Request', resolved.error || 'Please check your URL configuration.', 'warning');
     const urlInput = document.getElementById('request-url-input');
     if (urlInput) urlInput.focus();
     return;
@@ -2323,7 +2497,7 @@ async function handleSendRequest() {
     return;
   }
 
-  // 4. Validate JSON Body
+  // 4. Validate JSON Body (if configured)
   if (activeRequest.body.type === 'json' && activeRequest.body.text && activeRequest.body.text.trim()) {
     const jsonVal = validateJsonBody(activeRequest.body.text, 'json', false);
     if (!jsonVal.isValid) {
@@ -2337,35 +2511,6 @@ async function handleSendRequest() {
   isRequestRunning = true;
   const btnSend = document.getElementById('btn-send-request');
   const originalBtnHtml = btnSend ? btnSend.innerHTML : '';
-
-  // Assemble request headers map from enabled rows
-  const headersMap = {};
-  if (Array.isArray(activeRequest.headers)) {
-    activeRequest.headers.forEach(h => {
-      if (h.enabled && h.key && typeof h.key === 'string' && h.key.trim()) {
-        headersMap[h.key.trim()] = h.value !== undefined && h.value !== null ? String(h.value) : '';
-      }
-    });
-  }
-
-  // Prepare body payload
-  let bodyPayload = null;
-  if (activeRequest.body.type === 'json') {
-    bodyPayload = activeRequest.body.text ? activeRequest.body.text : null;
-  } else if (activeRequest.body.type === 'text') {
-    bodyPayload = activeRequest.body.text;
-  }
-
-  // Prepare auth payload
-  let authPayload = null;
-  if (activeRequest.auth && activeRequest.auth.type && activeRequest.auth.type !== 'none') {
-    authPayload = {
-      type: activeRequest.auth.type,
-      bearerToken: activeRequest.auth.bearerToken || '',
-      basicUsername: activeRequest.auth.basicUsername || '',
-      basicPassword: activeRequest.auth.basicPassword || ''
-    };
-  }
 
   // Set loading state on Send button
   if (btnSend) {
@@ -2389,13 +2534,7 @@ async function handleSendRequest() {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        method: activeRequest.method,
-        url: prepared.url,
-        headers: headersMap,
-        body: bodyPayload,
-        auth: authPayload
-      })
+      body: JSON.stringify(resolved.executionPayload)
     });
 
     let data;
@@ -3399,6 +3538,598 @@ function initPersistentCollections() {
 }
 
 /* ==========================================================================
+   11. Environment Management & Variables (Day 12)
+   ========================================================================== */
+
+let cachedEnvironments = [];
+let currentEditingEnvId = null;
+
+/**
+ * Fetches environments from GET /api/environments and populates the UI selector.
+ */
+async function fetchEnvironments() {
+  if (typeof fetch === 'undefined') return;
+
+  try {
+    const res = await fetch('/api/environments');
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.success || !Array.isArray(json.data)) return;
+
+    cachedEnvironments = json.data;
+
+    // Populate dropdown options
+    const envSelector = document.getElementById('env-selector');
+    if (envSelector) {
+      const currentVal = envSelector.value || activeRequest.selectedEnvironment || 'none';
+      envSelector.innerHTML = '<option value="none">No Environment</option>';
+
+      // Preserve predefined demo environments dev/staging/prod for quick testing & Day 3 tests
+      envSelector.innerHTML += '<option value="dev">Development (Local Demo)</option>';
+      envSelector.innerHTML += '<option value="staging">Staging (Demo)</option>';
+      envSelector.innerHTML += '<option value="prod">Production (Demo)</option>';
+
+      // Add database environments
+      cachedEnvironments.forEach(env => {
+        const opt = document.createElement('option');
+        opt.value = String(env.id);
+        opt.textContent = `${env.name}${env.is_active ? ' (Active)' : ''}`;
+        envSelector.appendChild(opt);
+      });
+
+      // Restore active selection: preference is localStorage, then active in DB, then fallback to currentVal
+      const storedActive = typeof localStorage !== 'undefined' ? localStorage.getItem('devprobe_active_env_id') : null;
+      let targetEnv = 'none';
+
+      if (storedActive && (cachedEnvironments.some(e => String(e.id) === String(storedActive)) || ['none', 'dev', 'staging', 'prod'].includes(storedActive))) {
+        targetEnv = storedActive;
+      } else {
+        const activeInDb = cachedEnvironments.find(e => e.is_active);
+        if (activeInDb) {
+          targetEnv = String(activeInDb.id);
+        } else if (currentVal) {
+          targetEnv = currentVal;
+        }
+      }
+
+      envSelector.value = targetEnv;
+      activeRequest.selectedEnvironment = targetEnv;
+
+      // If database environment is active, fetch its full variables
+      if (targetEnv !== 'none' && !['dev', 'staging', 'prod'].includes(targetEnv)) {
+        await fetchEnvironmentDetails(targetEnv);
+      }
+    }
+
+    updateQuickView();
+    updateUrlPreview();
+  } catch (err) {
+    // Fail gracefully on fetch error
+  }
+}
+
+/**
+ * Fetches single environment detail from backend and caches in ENVIRONMENTS.
+ */
+async function fetchEnvironmentDetails(envId) {
+  if (typeof fetch === 'undefined') return null;
+
+  try {
+    const res = await fetch(`/api/environments/${envId}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (!json.success || !json.data) return null;
+
+    const env = json.data;
+    ENVIRONMENTS[String(envId)] = {
+      name: env.name,
+      description: env.description,
+      variables: env.variables || []
+    };
+    return env;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Sets the active environment in workspace state, localStorage, and updates UI.
+ */
+async function setActiveEnvironment(envId) {
+  const normalizedId = String(envId);
+  activeRequest.selectedEnvironment = normalizedId;
+
+  if (typeof localStorage !== 'undefined') {
+    // Only store environment ID, NEVER store secrets in localStorage
+    localStorage.setItem('devprobe_active_env_id', normalizedId);
+  }
+
+  const envSelector = document.getElementById('env-selector');
+  if (envSelector) {
+    envSelector.value = normalizedId;
+  }
+
+  if (normalizedId !== 'none' && !['dev', 'staging', 'prod'].includes(normalizedId)) {
+    await fetchEnvironmentDetails(normalizedId);
+  }
+
+  const envObj = ENVIRONMENTS[normalizedId];
+  const envName = envObj ? envObj.name : 'Unknown';
+
+  updateQuickView();
+  updateUrlPreview();
+  if (typeof showToast === 'function') {
+    showToast('Environment Changed', `Active environment is now: ${envName}. Variables will resolve on request execution.`, 'info');
+  }
+}
+
+/**
+ * Updates the Quick View popover contents with active variables.
+ */
+function updateQuickView() {
+  if (typeof document === 'undefined') return;
+
+  const quickName = document.getElementById('quickview-env-name');
+  const quickCount = document.getElementById('quickview-var-count');
+  const quickEmpty = document.getElementById('quickview-empty-state');
+  const quickTable = document.getElementById('quickview-vars-table');
+  const quickTbody = document.getElementById('quickview-vars-tbody');
+
+  if (!quickName || !quickCount) return;
+
+  const currentEnvKey = activeRequest.selectedEnvironment;
+  const envObj = ENVIRONMENTS[currentEnvKey];
+
+  if (!envObj || currentEnvKey === 'none') {
+    quickName.textContent = 'No Environment';
+    quickCount.textContent = '0 variables';
+    if (quickEmpty) {
+      quickEmpty.textContent = 'No active variables in this environment';
+      quickEmpty.classList.remove('hidden');
+    }
+    if (quickTable) quickTable.classList.add('hidden');
+    if (quickTbody) quickTbody.innerHTML = '';
+    return;
+  }
+
+  quickName.textContent = envObj.name || 'Environment';
+
+  let varsList = [];
+  if (Array.isArray(envObj.variables)) {
+    varsList = envObj.variables.filter(v => v.is_enabled !== false);
+  } else if (typeof envObj.variables === 'object') {
+    varsList = Object.entries(envObj.variables).map(([k, v]) => ({ key: k, value: v, is_secret: false }));
+  }
+
+  quickCount.textContent = `${varsList.length} variable${varsList.length === 1 ? '' : 's'}`;
+
+  if (varsList.length === 0) {
+    if (quickEmpty) {
+      quickEmpty.textContent = 'No active variables in this environment';
+      quickEmpty.classList.remove('hidden');
+    }
+    if (quickTable) quickTable.classList.add('hidden');
+    if (quickTbody) quickTbody.innerHTML = '';
+  } else {
+    if (quickEmpty) quickEmpty.classList.add('hidden');
+    if (quickTable) quickTable.classList.remove('hidden');
+    if (quickTbody) {
+      quickTbody.innerHTML = '';
+      varsList.forEach(v => {
+        const tr = document.createElement('tr');
+        const key = v.key || v.var_key;
+        const val = v.is_secret ? '••••••••' : (v.value !== undefined ? String(v.value) : '');
+
+        tr.innerHTML = `
+          <td class="var-key-col">${escapeHtml(key)}</td>
+          <td class="${v.is_secret ? 'var-val-secret' : 'var-val-col'}">${escapeHtml(val)}</td>
+        `;
+        quickTbody.appendChild(tr);
+      });
+    }
+  }
+}
+
+function openEnvironmentManagerModal(selectEnvId = null) {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-environment-manager');
+  if (!modal) return;
+
+  modal.classList.add('active');
+  renderModalEnvList();
+
+  const targetId = selectEnvId || (activeRequest.selectedEnvironment !== 'none' && !['dev', 'staging', 'prod'].includes(activeRequest.selectedEnvironment) ? activeRequest.selectedEnvironment : (cachedEnvironments[0]?.id || 'new'));
+
+  loadEnvIntoModalEditor(targetId);
+}
+
+function closeEnvironmentManagerModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-environment-manager');
+  if (modal) modal.classList.remove('active');
+}
+
+function renderModalEnvList() {
+  const listEl = document.getElementById('modal-env-list');
+  if (!listEl) return;
+
+  listEl.innerHTML = '';
+
+  if (cachedEnvironments.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.padding = '8px 10px';
+    empty.style.color = 'var(--text-muted)';
+    empty.style.fontSize = '11px';
+    empty.style.fontStyle = 'italic';
+    empty.textContent = 'No saved environments';
+    listEl.appendChild(empty);
+    return;
+  }
+
+  cachedEnvironments.forEach(env => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = `modal-env-item ${String(env.id) === String(currentEditingEnvId) ? 'active' : ''}`;
+    item.innerHTML = `
+      <span class="env-item-name">${escapeHtml(env.name)}</span>
+      ${env.is_active ? '<span class="env-item-badge">Active</span>' : ''}
+    `;
+    item.addEventListener('click', () => {
+      loadEnvIntoModalEditor(env.id);
+    });
+    listEl.appendChild(item);
+  });
+}
+
+async function loadEnvIntoModalEditor(envId) {
+  currentEditingEnvId = envId;
+  renderModalEnvList();
+
+  const emptyView = document.getElementById('modal-env-empty-view');
+  const editorView = document.getElementById('modal-env-editor-view');
+  const idInput = document.getElementById('modal-env-id');
+  const nameInput = document.getElementById('modal-env-name-input');
+  const descInput = document.getElementById('modal-env-desc-input');
+  const btnActivate = document.getElementById('btn-modal-env-activate');
+  const btnDelete = document.getElementById('btn-modal-env-delete');
+  const tbody = document.getElementById('modal-env-vars-tbody');
+
+  if (!editorView || !emptyView) return;
+
+  emptyView.classList.add('hidden');
+  editorView.classList.remove('hidden');
+
+  if (envId === 'new') {
+    if (idInput) idInput.value = '';
+    if (nameInput) {
+      nameInput.value = '';
+      nameInput.focus();
+    }
+    if (descInput) descInput.value = '';
+    if (btnActivate) btnActivate.style.display = 'none';
+    if (btnDelete) btnDelete.style.display = 'none';
+    if (tbody) {
+      tbody.innerHTML = '';
+      addBlankVarRowToModal();
+    }
+    return;
+  }
+
+  if (btnActivate) btnActivate.style.display = 'inline-flex';
+  if (btnDelete) btnDelete.style.display = 'inline-flex';
+
+  const env = await fetchEnvironmentDetails(envId);
+  if (!env) return;
+
+  if (idInput) idInput.value = env.id;
+  if (nameInput) nameInput.value = env.name || '';
+  if (descInput) descInput.value = env.description || '';
+
+  if (tbody) {
+    tbody.innerHTML = '';
+    const vars = Array.isArray(env.variables) ? env.variables : [];
+    if (vars.length === 0) {
+      addBlankVarRowToModal();
+    } else {
+      vars.forEach(v => addVariableRowToModal(v));
+    }
+  }
+}
+
+function addVariableRowToModal(v = {}) {
+  const tbody = document.getElementById('modal-env-vars-tbody');
+  if (!tbody) return;
+
+  const tr = document.createElement('tr');
+  const isEnabled = v.is_enabled !== undefined ? Boolean(v.is_enabled) : true;
+  const isSecret = Boolean(v.is_secret);
+  const key = v.key || v.var_key || '';
+  const val = v.value !== undefined && v.value !== null ? String(v.value) : '';
+
+  tr.innerHTML = `
+    <td style="text-align: center;">
+      <input type="checkbox" class="var-check-enabled" ${isEnabled ? 'checked' : ''} title="Enable/Disable variable">
+    </td>
+    <td>
+      <input type="text" class="var-input-key font-mono" placeholder="Variable key" value="${escapeHtml(key)}">
+    </td>
+    <td>
+      <div class="val-input-wrapper">
+        <input type="${isSecret ? 'password' : 'text'}" class="var-input-val font-mono" placeholder="Value" value="${escapeHtml(val)}">
+        ${isSecret ? '<button type="button" class="btn-toggle-secret-visibility" title="Toggle visibility"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>' : ''}
+      </div>
+    </td>
+    <td style="text-align: center;">
+      <input type="checkbox" class="var-check-secret" ${isSecret ? 'checked' : ''} title="Mark as sensitive secret">
+    </td>
+    <td style="text-align: center;">
+      <button type="button" class="btn-remove-row btn-remove-var" title="Remove variable">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </td>
+  `;
+
+  // Secret toggle behavior
+  const secretCheck = tr.querySelector('.var-check-secret');
+  const valWrapper = tr.querySelector('.val-input-wrapper');
+  const valInput = tr.querySelector('.var-input-val');
+
+  if (secretCheck && valInput && valWrapper) {
+    secretCheck.addEventListener('change', () => {
+      valInput.type = secretCheck.checked ? 'password' : 'text';
+      let toggleBtn = valWrapper.querySelector('.btn-toggle-secret-visibility');
+      if (secretCheck.checked) {
+        if (!toggleBtn) {
+          toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'btn-toggle-secret-visibility';
+          toggleBtn.title = 'Toggle visibility';
+          toggleBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+          toggleBtn.addEventListener('click', () => {
+            valInput.type = valInput.type === 'password' ? 'text' : 'password';
+          });
+          valWrapper.appendChild(toggleBtn);
+        }
+      } else {
+        if (toggleBtn) toggleBtn.remove();
+      }
+    });
+
+    const existingToggle = valWrapper.querySelector('.btn-toggle-secret-visibility');
+    if (existingToggle) {
+      existingToggle.addEventListener('click', () => {
+        valInput.type = valInput.type === 'password' ? 'text' : 'password';
+      });
+    }
+  }
+
+  // Remove row
+  const removeBtn = tr.querySelector('.btn-remove-var');
+  if (removeBtn) {
+    removeBtn.addEventListener('click', () => {
+      tr.remove();
+      if (tbody.children.length === 0) {
+        addBlankVarRowToModal();
+      }
+    });
+  }
+
+  tbody.appendChild(tr);
+}
+
+function addBlankVarRowToModal() {
+  addVariableRowToModal({ is_enabled: true, is_secret: false, key: '', value: '' });
+}
+
+async function saveEnvironmentFromModal() {
+  const idInput = document.getElementById('modal-env-id');
+  const nameInput = document.getElementById('modal-env-name-input');
+  const descInput = document.getElementById('modal-env-desc-input');
+  const tbody = document.getElementById('modal-env-vars-tbody');
+  const btnSave = document.getElementById('btn-env-manager-save');
+
+  const name = (nameInput?.value || '').trim();
+  if (!name) {
+    showToast('Validation Error', 'Environment name is required.', 'warning');
+    return;
+  }
+
+  const description = (descInput?.value || '').trim();
+  const envId = idInput?.value || null;
+
+  // Collect variables
+  const variables = [];
+  const seenKeys = new Set();
+
+  if (tbody) {
+    for (const row of tbody.querySelectorAll('tr')) {
+      const key = (row.querySelector('.var-input-key')?.value || '').trim();
+      const val = row.querySelector('.var-input-val')?.value || '';
+      const isEnabled = Boolean(row.querySelector('.var-check-enabled')?.checked);
+      const isSecret = Boolean(row.querySelector('.var-check-secret')?.checked);
+
+      // Skip completely blank rows
+      if (!key && !val) continue;
+
+      if (!key) {
+        showToast('Validation Error', 'Variable key cannot be empty.', 'warning');
+        return;
+      }
+
+      const lowerKey = key.toLowerCase();
+      if (seenKeys.has(lowerKey)) {
+        showToast('Duplicate Variable', `Variable key '${key}' is duplicated in this environment.`, 'warning');
+        return;
+      }
+      seenKeys.add(lowerKey);
+
+      variables.push({
+        key,
+        value: val,
+        is_enabled: isEnabled,
+        is_secret: isSecret
+      });
+    }
+  }
+
+  const payload = {
+    name,
+    description: description || null,
+    variables
+  };
+
+  if (btnSave) btnSave.disabled = true;
+
+  try {
+    const url = envId ? `/api/environments/${envId}` : '/api/environments';
+    const method = envId ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      showToast('Error Saving Environment', json.error?.message || json.message || 'Operation failed', 'warning');
+      return;
+    }
+
+    showToast('Environment Saved', `Environment '${name}' saved successfully.`, 'success');
+    await fetchEnvironments();
+    loadEnvIntoModalEditor(json.data.id);
+  } catch (err) {
+    showToast('Network Error', err.message, 'warning');
+  } finally {
+    if (btnSave) btnSave.disabled = false;
+  }
+}
+
+async function activateEnvironmentFromModal() {
+  const idInput = document.getElementById('modal-env-id');
+  const envId = idInput?.value;
+  if (!envId) return;
+
+  try {
+    const res = await fetch(`/api/environments/${envId}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await res.json();
+    if (res.ok && json.success) {
+      await fetchEnvironments();
+      await setActiveEnvironment(envId);
+      renderModalEnvList();
+      showToast('Environment Activated', `Environment '${json.data.name}' is now active.`, 'success');
+    } else {
+      showToast('Activation Failed', json.error?.message || 'Could not activate environment', 'warning');
+    }
+  } catch (err) {
+    showToast('Network Error', err.message, 'warning');
+  }
+}
+
+async function deleteEnvironmentFromModal() {
+  const idInput = document.getElementById('modal-env-id');
+  const nameInput = document.getElementById('modal-env-name-input');
+  const envId = idInput?.value;
+  const envName = nameInput?.value || 'this environment';
+
+  if (!envId) return;
+
+  if (typeof confirm !== 'undefined' && !confirm(`Are you sure you want to delete environment '${envName}'? All its variables will be permanently deleted.`)) {
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/environments/${envId}`, {
+      method: 'DELETE'
+    });
+    const json = await res.json();
+    if (res.ok && json.success) {
+      showToast('Environment Deleted', `Environment '${envName}' deleted.`, 'info');
+      if (String(activeRequest.selectedEnvironment) === String(envId)) {
+        await setActiveEnvironment('none');
+      }
+      await fetchEnvironments();
+      const firstRemaining = cachedEnvironments[0]?.id || 'new';
+      loadEnvIntoModalEditor(firstRemaining);
+    } else {
+      showToast('Delete Failed', json.error?.message || 'Could not delete environment', 'warning');
+    }
+  } catch (err) {
+    showToast('Network Error', err.message, 'warning');
+  }
+}
+
+function initEnvironmentManagement() {
+  if (typeof document === 'undefined') return;
+
+  // 1. Quickview button toggle
+  const btnQuickView = document.getElementById('btn-env-quickview');
+  const popover = document.getElementById('env-quickview-popover');
+
+  if (btnQuickView && popover) {
+    btnQuickView.addEventListener('click', (e) => {
+      e.stopPropagation();
+      popover.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!popover.contains(e.target) && e.target !== btnQuickView && !btnQuickView.contains(e.target)) {
+        popover.classList.add('hidden');
+      }
+    });
+  }
+
+  // 2. Manage environments button
+  const btnManage = document.getElementById('btn-manage-environments');
+  if (btnManage) {
+    btnManage.addEventListener('click', () => {
+      openEnvironmentManagerModal();
+    });
+  }
+
+  // 3. Modal close & cancel
+  const btnClose = document.getElementById('btn-env-manager-close');
+  const btnCancel = document.getElementById('btn-env-manager-cancel');
+  if (btnClose) btnClose.addEventListener('click', closeEnvironmentManagerModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeEnvironmentManagerModal);
+
+  // 4. Modal action buttons
+  const btnCreateNew = document.getElementById('btn-env-create-new');
+  if (btnCreateNew) {
+    btnCreateNew.addEventListener('click', () => {
+      loadEnvIntoModalEditor('new');
+    });
+  }
+
+  const btnAddVar = document.getElementById('btn-env-add-var-row');
+  if (btnAddVar) {
+    btnAddVar.addEventListener('click', addBlankVarRowToModal);
+  }
+
+  const btnSave = document.getElementById('btn-env-manager-save');
+  if (btnSave) {
+    btnSave.addEventListener('click', saveEnvironmentFromModal);
+  }
+
+  const btnActivate = document.getElementById('btn-modal-env-activate');
+  if (btnActivate) {
+    btnActivate.addEventListener('click', activateEnvironmentFromModal);
+  }
+
+  const btnDelete = document.getElementById('btn-modal-env-delete');
+  if (btnDelete) {
+    btnDelete.addEventListener('click', deleteEnvironmentFromModal);
+  }
+
+  // 5. Initial fetch
+  fetchEnvironments();
+}
+
+/* ==========================================================================
    9. Testing and Module Compatibility Export
    ========================================================================== */
 
@@ -3443,7 +4174,20 @@ if (typeof window !== 'undefined') {
     openDeleteSavedRequestModal,
     createSavedRequestRow,
     getCachedCollections: () => cachedCollections,
-    getCachedSavedRequests: () => cachedSavedRequests
+    getCachedSavedRequests: () => cachedSavedRequests,
+    resolveEntireRequest,
+    fetchEnvironments,
+    fetchEnvironmentDetails,
+    setActiveEnvironment,
+    updateQuickView,
+    openEnvironmentManagerModal,
+    closeEnvironmentManagerModal,
+    saveEnvironmentFromModal,
+    activateEnvironmentFromModal,
+    deleteEnvironmentFromModal,
+    addVariableRowToModal,
+    getCachedEnvironments: () => cachedEnvironments,
+    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; }
   };
 }
 
@@ -3487,7 +4231,20 @@ if (typeof module !== 'undefined' && module.exports) {
     openDeleteSavedRequestModal,
     createSavedRequestRow,
     getCachedCollections: () => cachedCollections,
-    getCachedSavedRequests: () => cachedSavedRequests
+    getCachedSavedRequests: () => cachedSavedRequests,
+    resolveEntireRequest,
+    fetchEnvironments,
+    fetchEnvironmentDetails,
+    setActiveEnvironment,
+    updateQuickView,
+    openEnvironmentManagerModal,
+    closeEnvironmentManagerModal,
+    saveEnvironmentFromModal,
+    activateEnvironmentFromModal,
+    deleteEnvironmentFromModal,
+    addVariableRowToModal,
+    getCachedEnvironments: () => cachedEnvironments,
+    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; }
   };
 }
 

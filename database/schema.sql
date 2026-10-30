@@ -64,3 +64,44 @@ CREATE TABLE IF NOT EXISTS `saved_requests` (
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------------------------------
+-- Table: environments
+-- Day 12: Logical environments (e.g. Development, Staging, Production)
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `environments` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(255) NOT NULL,
+  `description` TEXT NULL,
+  `is_active` BOOLEAN NOT NULL DEFAULT FALSE,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_environments_name` (`name`),
+  INDEX `idx_environments_is_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------------------------------
+-- Table: environment_variables
+-- Day 12: Key-value variable pairs associated with an environment
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `environment_variables` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `environment_id` INT UNSIGNED NOT NULL,
+  `var_key` VARCHAR(255) NOT NULL,
+  `var_value` TEXT NULL,
+  `is_secret` BOOLEAN NOT NULL DEFAULT FALSE,
+  `is_enabled` BOOLEAN NOT NULL DEFAULT TRUE,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_env_vars_env_id` (`environment_id`),
+  INDEX `idx_env_vars_key` (`var_key`),
+  UNIQUE KEY `uk_env_vars_env_key` (`environment_id`, `var_key`),
+  CONSTRAINT `fk_env_vars_environment`
+    FOREIGN KEY (`environment_id`)
+    REFERENCES `environments` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+

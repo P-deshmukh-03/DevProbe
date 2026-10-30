@@ -19,7 +19,7 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 
 ## 📅 Current Development Status
 
-**Day 11 of 16 — Saved Request & Collection Management**
+**Day 12 of 16 — Environment Management & Dynamic Variable Resolution**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
@@ -33,6 +33,7 @@ Completed Milestones:
 - **Day 9**: MySQL database connection layer with `mysql2/promise` connection pooling, configuration via environment variables, initial relational schema (`collections`, `saved_requests`), safe error handling without credential leakage, database readiness health-check endpoint (`GET /api/health/db`), and automated Day 9 test suite.
 - **Day 10**: Collections and saved requests persistence in MySQL (`GET`/`POST /api/collections`, `GET`/`POST /api/requests/saved`), collection filtering, modal dialogs for collection and request creation, strict credential protection (bearer tokens and passwords stripped before persistence), and safe non-dispatch request loading.
 - **Day 11**: Full collection and saved request management: updating collections (`PUT /api/collections/:id`), safe collection deletion (`DELETE /api/collections/:id`) with automatic foreign key disassociation (`ON DELETE SET NULL`), saved request modification (`PUT /api/requests/saved/:id`), saved request deletion (`DELETE /api/requests/saved/:id`), interactive dark-theme workspace modals, and frontend non-dispatch verification.
+- **Day 12**: Complete Postman-style environment management: relational MySQL schema (`environments`, `environment_variables`) with `ON DELETE CASCADE`, AES-256-GCM secret encryption at rest via dedicated `DEVPROBE_ENCRYPTION_KEY`, API response secret masking (`••••••••`), secret preservation on update, atomic environment activation/deactivation, dynamic variable resolution across URLs, query params, headers, body, and auth on cloned execution payloads, SSRF integration blocking resolved loopback/metadata targets, dark-theme Environment Manager modal, and Quick View popover.
 
 ## ✨ Features
 
@@ -42,6 +43,7 @@ Completed Milestones:
 - [x] **Real Outbound Execution Engine** — Secure HTTP/HTTPS dispatching with DNS pinning, manual redirects, and response capture (`POST /api/requests/execute`).
 - [x] **Live Response Inspector** — Inspect upstream status, latency (ms), payload size, headers table, raw/pretty JSON body, and cookie security policies.
 - [x] **Request Collections & Saved Requests** — Save, organize, edit, and delete requests into persistent collections (Day 10 & Day 11).
+- [x] **Environment Management & Dynamic Variables** — Postman-style environments with AES-256-GCM encrypted secrets, Quick Look popover, and variable resolution across URLs, headers, body, and auth (Day 12).
 - [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
 - [ ] **Automated API Testing** — Assert status codes, response times, and JSON schema.
 - [ ] **API Documentation Generator** — Generate shareable documentation from saved requests.
@@ -70,6 +72,7 @@ DevProbe/
 │   │   └── security.js             # Security policies, SSRF defenses, DNS validation, & execution limits
 │   ├── controllers/
 │   │   ├── collectionController.js # Collection CRUD and management controller
+│   │   ├── environmentController.js # Environment and variables CRUD controller
 │   │   ├── requestController.js    # Request controller (validate & execute endpoints)
 │   │   └── savedRequestController.js # Saved request CRUD and management controller
 │   ├── middleware/
@@ -77,10 +80,12 @@ DevProbe/
 │   │   └── validateRequest.js      # Request payload validation middleware
 │   ├── routes/
 │   │   ├── collectionRoutes.js     # Collection routes (GET, POST, PUT, DELETE)
+│   │   ├── environmentRoutes.js    # Environment routes (GET, POST, PUT, DELETE, activate, variables)
 │   │   ├── requestRoutes.js        # Request configuration route definitions
 │   │   └── savedRequestRoutes.js   # Saved request routes (GET, POST, PUT, DELETE)
 │   └── services/
 │       ├── collectionService.js    # Collection persistence & safe deletion service
+│       ├── environmentService.js   # Environment & variable CRUD, AES-256-GCM encryption, & masking service
 │       ├── requestService.js       # Real execution engine, DNS pinning, & normalization service
 │       └── savedRequestService.js  # Saved requests persistence, credential scrubbing, & update service
 │
@@ -93,6 +98,7 @@ DevProbe/
 ├── test-day9.js                    # Day 9 automated database integration test suite (61 tests)
 ├── test-day10.js                   # Day 10 automated persistence test suite (88 tests)
 ├── test-day11.js                   # Day 11 automated management test suite (83 tests)
+├── test-day12.js                   # Day 12 automated environment management test suite (101 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -105,7 +111,7 @@ DevProbe/
 
 DevProbe adheres to a structured, layered architecture:
 
-- **`src/app.js`**: Bootstraps the Express application, configures security headers (`nosniff`, `DENY`), serves public assets, mounts API routes (`/api/requests`, `/api/collections`, `/api/requests/saved`), provides application health check (`GET /api/health`) and database readiness check (`GET /api/health/db`), and manages graceful shutdown.
+- **`src/app.js`**: Bootstraps the Express application, configures security headers (`nosniff`, `DENY`), serves public assets, mounts API routes (`/api/requests`, `/api/collections`, `/api/requests/saved`, `/api/environments`), provides application health check (`GET /api/health`) and database readiness check (`GET /api/health/db`), and manages graceful shutdown.
 - **`src/config/database.js`**: Manages the MySQL connection pool singleton via `mysql2/promise`, reads configuration from environment variables, provides connectivity test and health check helpers, enforces parameterized query safety, and translates raw database errors into sanitized user-safe diagnostics.
 - **`src/config/security.js`**: Defines execution limits (timeouts, payload sizes, redirects), permitted methods/protocols, sensitive header classifications, hop-by-hop header lists, and SSRF defense logic (inspects hostnames, IPv4 ranges, IPv6 representations, IPv4-mapped IPv6, and cloud metadata addresses).
 - **`src/middleware/validateRequest.js`**: Validates incoming request payloads for both `/validate` and `/execute`. Rejects unsupported methods, malformed URLs, non-HTTP protocols, embedded credentials, restricted destinations, invalid RFC 7230 headers, and oversized payloads.
@@ -116,6 +122,8 @@ DevProbe adheres to a structured, layered architecture:
 - **`src/controllers/collectionController.js`**: Handles collection HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
 - **`src/services/savedRequestService.js`**: Manages saved request persistence: validation, header and credential scrubbing (stripping tokens, passwords, cookies), creating, listing with optional `collectionId` filter, fetching by ID, updating request definitions, and deleting saved requests.
 - **`src/controllers/savedRequestController.js`**: Handles saved request HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
+- **`src/services/environmentService.js`**: Manages environment and variable business logic: CRUD, unique key enforcement, atomic activation/deactivation, AES-256-GCM encryption at rest for sensitive secrets, safe masking (`••••••••`), and secret preservation during updates.
+- **`src/controllers/environmentController.js`**: Handles environment HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`, `/activate`, `/deactivate`, and nested variable routes).
 
 ## 🔒 Security Architecture & SSRF Defenses
 
@@ -369,7 +377,67 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
   - **Status**: `200 OK`
   - **Behavior**: Permanently deletes the specified saved request record. Returns 404 if request does not exist. Leaves all other requests and collections intact.
 
-### 7. Execution Error Response Format
+### 7. Environments API (Day 12)
+- **List Environments**: `GET /api/environments`
+  - **Status**: `200 OK`
+  - **Response**:
+    ```json
+    {
+      "success": true,
+      "data": [
+        {
+          "id": 1,
+          "name": "Staging",
+          "description": "Staging API cluster",
+          "is_active": true,
+          "created_at": "2026-10-30T10:00:00.000Z",
+          "updated_at": "2026-10-30T10:00:00.000Z",
+          "variable_count": 3
+        }
+      ]
+    }
+    ```
+
+- **Retrieve Environment by ID**: `GET /api/environments/:id`
+  - **Status**: `200 OK` or `404 Not Found`
+  - **Security Guarantee**: Sensitive variables marked `is_secret = true` return masked values (`••••••••`) and `has_value: true` to prevent accidental screen or inspection exposure.
+
+- **Create Environment**: `POST /api/environments`
+  - **Status**: `201 Created`
+  - **Body**:
+    ```json
+    {
+      "name": "Production",
+      "description": "Live production environment",
+      "variables": [
+        { "key": "base_url", "value": "https://api.example.com", "is_secret": false },
+        { "key": "api_key", "value": "sk_live_secret123", "is_secret": true }
+      ]
+    }
+    ```
+  - **Secret Encryption**: Sensitive variables are encrypted at rest via AES-256-GCM before MySQL insertion. Plaintext secrets never touch the database.
+
+- **Update Environment**: `PUT /api/environments/:id`
+  - **Status**: `200 OK`
+  - **Secret Preservation**: If a client submits a masked placeholder (`••••••••`) for an unchanged secret, DevProbe preserves the existing encrypted ciphertext rather than overwriting it with bullet dots.
+
+- **Delete Environment**: `DELETE /api/environments/:id`
+  - **Status**: `200 OK`
+  - **Cascade Guarantee**: Child variables in `environment_variables` are automatically pruned by MySQL via foreign key `ON DELETE CASCADE`.
+
+- **Activate Environment**: `POST /api/environments/:id/activate`
+  - **Status**: `200 OK`
+  - **Atomic Switch**: Sets targeted environment to `is_active = true` and deactivates all other environments atomically within a transaction.
+
+- **Deactivate All Environments**: `POST /api/environments/deactivate`
+  - **Status**: `200 OK` (Switches to "No Environment").
+
+- **Granular Variable Endpoints**:
+  - `POST /api/environments/:id/variables`: Add single variable (rejects duplicate keys with `400 DUPLICATE_VARIABLE_KEY`).
+  - `PUT /api/environments/:id/variables/:varId`: Update variable key, value, secret flag, or enabled flag.
+  - `DELETE /api/environments/:id/variables/:varId`: Delete single variable.
+
+### 8. Execution Error Response Format
 When destination validation fails or limits are exceeded, a structured error is returned:
 ```json
 {
@@ -443,6 +511,9 @@ DB_CONNECT_TIMEOUT=10000
 
 # Security / SSRF configuration
 DEVPROBE_ALLOW_LOCAL_TARGETS=false
+
+# Day 12: Environment Secrets Encryption (AES-256-GCM)
+DEVPROBE_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 ### 3. Start MySQL in XAMPP
@@ -455,7 +526,7 @@ If you are using XAMPP for local MySQL development:
 
 ### 4. Initialize Database Schema
 
-You can apply the initial relational schema (`collections`, `saved_requests`) using any of the following methods:
+You can apply the relational schema (`collections`, `saved_requests`, `environments`, `environment_variables`) using any of the following methods:
 
 - **Method A (Node.js automated runner)**:
   ```bash
@@ -491,10 +562,10 @@ curl http://localhost:3000/api/health/db
 
 ## 🧪 Automated Testing
 
-DevProbe features a multi-tiered automated test suite with **653 passing tests** across 9 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, and complete collection/saved request management:
+DevProbe features a multi-tiered automated test suite with **754 passing tests** across 10 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, collection/request management, and environment variable resolution:
 
 ```bash
-# Run all test suites (Day 3 through Day 11 — 653 total tests)
+# Run all test suites (Day 3 through Day 12 — 754 total tests)
 npm test
 
 # Run individual test suites
@@ -507,6 +578,7 @@ npm run test:day8    # Day 8: Security hardening & IPv6 edge cases (71 tests)
 npm run test:day9    # Day 9: MySQL database integration (61 tests)
 npm run test:day10   # Day 10: Collections & saved requests persistence (88 tests)
 npm run test:day11   # Day 11: Saved request & collection management (83 tests)
+npm run test:day12   # Day 12: Environment management & dynamic variable resolution (101 tests)
 ```
 
 ### Day 10 Test Coverage (88 Tests)
@@ -531,6 +603,17 @@ npm run test:day11   # Day 11: Saved request & collection management (83 tests)
 - **TEST E**: Parameterized SQL execution & SQL injection resistance across all update and delete endpoints.
 - **TEST F**: Frontend non-dispatch verification and modal function exports (`openEditCollectionModal`, `openDeleteCollectionModal`, `openEditSavedRequestModal`, `openDeleteSavedRequestModal`, and non-dispatch on request selection).
 
+### Day 12 Test Coverage (101 Tests)
+- **TEST A**: Environment validation (rejects missing names, whitespace names, strings > 255 chars, non-numeric IDs, and returns 404 for missing environments).
+- **TEST B**: Environment CRUD operations (`POST /api/environments`, `GET /api/environments`, `GET /api/environments/:id`, `PUT /api/environments/:id`, and `DELETE /api/environments/:id`).
+- **TEST C**: Variable CRUD operations, duplicate key rejection (`400 DUPLICATE_VARIABLE_KEY`), and foreign key cascade deletion (`ON DELETE CASCADE`).
+- **TEST D**: Environment atomic activation (`POST /:id/activate`) and deactivation (`POST /deactivate`).
+- **TEST E**: Secret protection: AES-256-GCM encryption at rest, API response masking (`••••••••`), secret preservation on update, and safe handling of missing/corrupted encryption keys.
+- **TEST F**: Dynamic variable resolution across URLs, query params, headers, request bodies, and auth (Bearer and Basic). Missing/disabled variable interception without secret leakage.
+- **TEST G**: SSRF protection integration: variables resolving to loopback (`127.0.0.1`), `localhost`, cloud metadata (`169.254.169.254`), or `file://` protocols are blocked.
+- **TEST H**: SQL injection resistance across all environment endpoints.
+- **TEST I**: Backward compatibility contracts with Day 3 verification test suite (`getEnvironmentVariable`, `resolveVariables`).
+
 ### Database Troubleshooting
 
 | Error Code | Meaning | Solution |
@@ -551,8 +634,8 @@ npm run test:day11   # Day 11: Saved request & collection management (83 tests)
 | Day 9 | MySQL database connection pool, initial schema & health checks | Completed |
 | Day 10 | Collections and saved requests persistence with secret credential protection | Completed |
 | Day 11 | Saved request & collection management (edit, delete, disassociation, modals) | Completed |
-| Day 12 | Environments & request history persistence | Planned |
-| Days 13–16 | Automated tests, documentation, and final deployment | Planned |
+| Day 12 | Environment management & dynamic variable resolution (AES-256-GCM, modals) | Completed |
+| Days 13–16 | Test runner, documentation generator, import/export, and final deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -561,4 +644,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 11 complete. Saved request and collection management fully implemented with `PUT`/`DELETE /api/collections/:id` and `PUT`/`DELETE /api/requests/saved/:id`, safe collection deletion with request disassociation (`ON DELETE SET NULL`), credential scrubbing, dark-theme management modals in the sidebar, safe non-dispatch request loading, and 653 automated tests passing with zero regressions.
+**In Active Development** — Day 12 complete. Environment management and dynamic variable resolution fully implemented with relational MySQL storage (`environments`, `environment_variables`), AES-256-GCM secret encryption at rest, API secret masking, secret preservation during editing, atomic activation, variable resolution across URLs, headers, body, and auth on cloned execution payloads, SSRF defense integration, Quick Look popover, dark-theme Environment Manager modal, and 754 automated tests passing with zero regressions.
