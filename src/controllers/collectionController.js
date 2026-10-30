@@ -65,9 +65,50 @@ async function createCollection(req, res, next) {
   }
 }
 
+/**
+ * Handle PUT /api/collections/:id
+ * Updates an existing collection.
+ */
+async function updateCollection(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { name, description } = req.body || {};
+    const updated = await collectionService.updateCollection(id, { name, description });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Collection updated successfully',
+      data: updated
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * Handle DELETE /api/collections/:id
+ * Deletes a collection safely (unassigning its saved requests).
+ */
+async function deleteCollection(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await collectionService.deleteCollection(id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Collection deleted successfully',
+      data: result
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getCollections,
   getCollectionById,
-  createCollection
+  createCollection,
+  updateCollection,
+  deleteCollection
 };
 

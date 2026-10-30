@@ -61,9 +61,49 @@ async function createSavedRequest(req, res, next) {
   }
 }
 
+/**
+ * Handle PUT /api/requests/saved/:id
+ * Updates an existing saved request.
+ */
+async function updateSavedRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const updated = await savedRequestService.updateSavedRequest(id, req.body);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Saved request updated successfully',
+      data: updated
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * Handle DELETE /api/requests/saved/:id
+ * Deletes a saved request.
+ */
+async function deleteSavedRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const result = await savedRequestService.deleteSavedRequest(id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Saved request deleted successfully',
+      data: result
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   getSavedRequests,
   getSavedRequestById,
-  createSavedRequest
+  createSavedRequest,
+  updateSavedRequest,
+  deleteSavedRequest
 };
 

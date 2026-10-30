@@ -320,10 +320,208 @@ async function createSavedRequest(payload = {}) {
   }
 }
 
+/**
+ * Updates an existing saved request in MySQL.
+ * Strictly validates fields, enforces method allowlist, and strips authentication credentials.
+ *
+ * @param {number|string} id - Saved request ID to update
+ * @param {object} payload - Updated request configuration
+ * @returns {Promise<object>} Updated saved request record
+ */
+async function updateSavedRequest(id, payload = {}) {
+  const numericId = parseInt(id, 10);
+  if (Number.isNaN(numericId) || numericId <= 0) {
+    throw new AppError('Saved request ID must be a positive integer', 400, 'INVALID_REQUEST_ID', null, 'id');
+  }
+
+  const {
+    name,
+    method,
+    url,
+    collection_id,
+    collectionId,
+    headers,
+    params,
+    body,
+    body_type,
+    bodyType,
+    auth_type,
+    authType,
+    auth
+  } = payload;
+
+  // 1. Validate request name
+  if (name === undefined || name === null || typeof name !== 'string') {
+    throw new AppError('Request name is required and must be a string', 400, 'VALIDATION_ERROR', null, 'name');
+  }
+  const trimmedName = name.trim();
+  if (trimmedName.length === 0) {
+    throw new AppError('Request name cannot be empty', 400, 'VALIDATION_ERROR', null, 'name');
+  }
+  if (trimmedName.length > 255) {
+    throw new AppError('Request name cannot exceed 255 characters', 400, 'VALIDATION_ERROR', null, 'name');
+  }
+
+  // 2. Validate HTTP method
+  if (!method || typeof method !== 'string') {
+    throw new AppError('HTTP method is required', 400, 'VALIDATION_ERROR', null, 'method');
+  }
+  const normalizedMethod = method.trim().toUpperCase();
+  if (!ALLOWED_HTTP_METHODS.includes(normalizedMethod)) {
+    throw new AppError(
+      `Unsupported HTTP method '${method}'. Permitted methods: ${ALLOWED_HTTP_METHODS.join(', ')}`,
+      400,
+      'UNSUPPORTED_METHOD',
+      null,
+      'method'
+    );
+  }
+
+  // 3. Validate URL format and protocol
+  if (!url || typeof url !== 'string') {
+    throw new AppError('URL is required and must be a string', 400, 'VALIDATION_ERROR', null, 'url');
+  }
+  const trimmedUrl = url.trim();
+  if (trimmedUrl.length === 0) {
+    throw new AppError('URL cannot be empty', 400, 'VALIDATION_ERROR', null, 'url');
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(trimmedUrl);
+  } catch {
+    throw new AppError(`Invalid URL format: '${trimmedUrl}'`, 400, 'INVALID_URL', null, 'url');
+  }
+
+  if (!ALLOWED_PROTOCOLS.includes(parsedUrl.protocol)) {
+    throw new AppError(
+      `Unsupported protocol '${parsedUrl.protocol}'. Only 'http:' and 'https:' are permitted.`,
+      400,
+      'INVALID_PROTOCOL',
+      null,
+      'url'
+    );
+  }
+
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new AppError('URLs with embedded credentials (username:password@...) are prohibited', 400, 'EMBEDDED_CREDENTIALS', null, 'url');
+  }
+
+  // 4. Verify that the saved request exists (throws 404 if missing)
+  await getSavedRequestById(numericId);
+
+  // 5. Validate collection ID and existence if provided
+  const targetColId = collection_id !== undefined ? collection_id : collectionId;
+  let safeCollectionId = null;
+
+  if (targetColId !== undefined && targetColId !== null && targetColId !== '') {
+    const numericColId = parseInt(targetColId, 10);
+    if (Number.isNaN(numericColId) || numericColId <= 0) {
+      throw new AppError('Collection ID must be a positive integer if provided', 400, 'INVALID_COLLECTION_ID', null, 'collection_id');
+    }
+
+    try {
+      const [colRows] = await executeQuery('SELECT id FROM collections WHERE id = ?', [numericColId]);
+      if (!colRows || colRows.length === 0) {
+        throw new AppError(`Collection with ID ${numericColId} not found`, 404, 'COLLECTION_NOT_FOUND', null, 'collection_id');
+      }
+      safeCollectionId = numericColId;
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(sanitizeDatabaseError(err), 500, 'DATABASE_ERROR');
+    }
+  }
+
+  // 6. Sanitize headers (strictly purge sensitive auth/tokens/passwords)
+  const sanitizedHeaders = sanitizeSavedHeaders(headers);
+  const jsonHeaders = sanitizedHeaders ? JSON.stringify(sanitizedHeaders) : null;
+
+  // 7. Handle parameters
+  let jsonParams = null;
+  if (params !== undefined && params !== null) {
+    if (Array.isArray(params) || typeof params === 'object') {
+      jsonParams = JSON.stringify(params);
+    }
+  }
+
+  // 8. Validate body type and body
+  const rawBodyType = body_type || bodyType || 'none';
+  const safeBodyType = VALID_BODY_TYPES.has(rawBodyType.toLowerCase()) ? rawBodyType.toLowerCase() : 'none';
+  const safeBody = (safeBodyType !== 'none' && body !== undefined && body !== null) ? String(body) : null;
+
+  // 9. Authentication protection: store ONLY safe auth scheme metadata, NEVER tokens or passwords
+  const rawAuthType = auth_type || authType || (auth && typeof auth === 'object' ? auth.type : null) || 'none';
+  const safeAuthType = VALID_AUTH_TYPES.has(String(rawAuthType).toLowerCase()) ? String(rawAuthType).toLowerCase() : 'none';
+
+  // 10. Execute parameterized UPDATE
+  try {
+    const updateSql = `
+      UPDATE saved_requests SET
+        collection_id = ?,
+        name = ?,
+        method = ?,
+        url = ?,
+        headers = ?,
+        params = ?,
+        body = ?,
+        body_type = ?,
+        auth_type = ?
+      WHERE id = ?
+    `;
+
+    await executeQuery(updateSql, [
+      safeCollectionId,
+      trimmedName,
+      normalizedMethod,
+      trimmedUrl,
+      jsonHeaders,
+      jsonParams,
+      safeBody,
+      safeBodyType,
+      safeAuthType,
+      numericId
+    ]);
+
+    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const [rows] = await executeQuery(fetchSql, [numericId]);
+
+    return formatSavedRequest(rows[0]);
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError(sanitizeDatabaseError(err), 500, 'DATABASE_ERROR');
+  }
+}
+
+/**
+ * Deletes a saved request by ID.
+ *
+ * @param {number|string} id - Saved request ID to delete
+ * @returns {Promise<{ id: number, deleted: boolean }>} Deletion result
+ */
+async function deleteSavedRequest(id) {
+  const numericId = parseInt(id, 10);
+  if (Number.isNaN(numericId) || numericId <= 0) {
+    throw new AppError('Saved request ID must be a positive integer', 400, 'INVALID_REQUEST_ID', null, 'id');
+  }
+
+  // Verify that the saved request exists (throws 404 if missing)
+  await getSavedRequestById(numericId);
+
+  try {
+    await executeQuery('DELETE FROM saved_requests WHERE id = ?', [numericId]);
+    return { id: numericId, deleted: true };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError(sanitizeDatabaseError(err), 500, 'DATABASE_ERROR');
+  }
+}
+
 module.exports = {
   getSavedRequests,
   getSavedRequestById,
   createSavedRequest,
+  updateSavedRequest,
+  deleteSavedRequest,
   sanitizeSavedHeaders,
   formatSavedRequest
 };

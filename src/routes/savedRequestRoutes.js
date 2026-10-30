@@ -27,5 +27,17 @@ router.get('/:id', savedRequestController.getSavedRequestById);
  */
 router.post('/', savedRequestController.createSavedRequest);
 
+/**
+ * PUT /api/requests/saved/:id
+ * Update an existing saved request
+ */
+router.put('/:id', savedRequestController.updateSavedRequest);
+
+/**
+ * DELETE /api/requests/saved/:id
+ * Delete a saved request
+ */
+router.delete('/:id', savedRequestController.deleteSavedRequest);
+
 module.exports = router;
 

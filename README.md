@@ -19,7 +19,7 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 
 ## 📅 Current Development Status
 
-**Day 9 of 16 — MySQL Database Integration**
+**Day 11 of 16 — Saved Request & Collection Management**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
@@ -31,6 +31,8 @@ Completed Milestones:
 - **Day 7**: Advanced error handling, standardized AppError classification, CRLF injection prevention, duplicate header detection, security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-Powered-By` disabling), and regression test suite.
 - **Day 8**: Security audit, IPv6 tunneling/transition defenses (6to4, NAT64, Teredo), trailing-dot domain bypass prevention, sensitive response header redaction (`Set-Cookie`), socket timeout cleanup, and response viewer layout clipping resolution.
 - **Day 9**: MySQL database connection layer with `mysql2/promise` connection pooling, configuration via environment variables, initial relational schema (`collections`, `saved_requests`), safe error handling without credential leakage, database readiness health-check endpoint (`GET /api/health/db`), and automated Day 9 test suite.
+- **Day 10**: Collections and saved requests persistence in MySQL (`GET`/`POST /api/collections`, `GET`/`POST /api/requests/saved`), collection filtering, modal dialogs for collection and request creation, strict credential protection (bearer tokens and passwords stripped before persistence), and safe non-dispatch request loading.
+- **Day 11**: Full collection and saved request management: updating collections (`PUT /api/collections/:id`), safe collection deletion (`DELETE /api/collections/:id`) with automatic foreign key disassociation (`ON DELETE SET NULL`), saved request modification (`PUT /api/requests/saved/:id`), saved request deletion (`DELETE /api/requests/saved/:id`), interactive dark-theme workspace modals, and frontend non-dispatch verification.
 
 ## ✨ Features
 
@@ -39,7 +41,7 @@ Completed Milestones:
 - [x] **Preparation Validation Endpoint** — Server-side syntax and SSRF verification without outbound dispatch (`POST /api/requests/validate`).
 - [x] **Real Outbound Execution Engine** — Secure HTTP/HTTPS dispatching with DNS pinning, manual redirects, and response capture (`POST /api/requests/execute`).
 - [x] **Live Response Inspector** — Inspect upstream status, latency (ms), payload size, headers table, raw/pretty JSON body, and cookie security policies.
-- [ ] **Request Collections & History** — Save and organize requests into persistent collections (Day 9).
+- [x] **Request Collections & Saved Requests** — Save, organize, edit, and delete requests into persistent collections (Day 10 & Day 11).
 - [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
 - [ ] **Automated API Testing** — Assert status codes, response times, and JSON schema.
 - [ ] **API Documentation Generator** — Generate shareable documentation from saved requests.
@@ -67,22 +69,30 @@ DevProbe/
 │   │   ├── database.js             # MySQL connection pool, health check, & sanitized error handling
 │   │   └── security.js             # Security policies, SSRF defenses, DNS validation, & execution limits
 │   ├── controllers/
-│   │   └── requestController.js    # Request controller (validate & execute endpoints)
+│   │   ├── collectionController.js # Collection CRUD and management controller
+│   │   ├── requestController.js    # Request controller (validate & execute endpoints)
+│   │   └── savedRequestController.js # Saved request CRUD and management controller
 │   ├── middleware/
 │   │   ├── errorHandler.js         # Centralized error handler and 404 handler
 │   │   └── validateRequest.js      # Request payload validation middleware
 │   ├── routes/
-│   │   └── requestRoutes.js        # Request configuration route definitions
+│   │   ├── collectionRoutes.js     # Collection routes (GET, POST, PUT, DELETE)
+│   │   ├── requestRoutes.js        # Request configuration route definitions
+│   │   └── savedRequestRoutes.js   # Saved request routes (GET, POST, PUT, DELETE)
 │   └── services/
-│       └── requestService.js       # Real execution engine, DNS pinning, & normalization service
+│       ├── collectionService.js    # Collection persistence & safe deletion service
+│       ├── requestService.js       # Real execution engine, DNS pinning, & normalization service
+│       └── savedRequestService.js  # Saved requests persistence, credential scrubbing, & update service
 │
 ├── test-day3.js                    # Day 3 automated verification test suite (34 tests)
-├── test-day4.js                    # Day 4 automated verification test suite (36 tests)
-├── test-day5.js                    # Day 5 automated verification test suite (44 tests)
+├── test-day4.js                    # Day 4 automated verification test suite (67 tests)
+├── test-day5.js                    # Day 5 automated verification test suite (68 tests)
 ├── test-day6.js                    # Day 6 automated verification test suite (118 tests)
-├── test-day7.js                    # Day 7 automated verification test suite (62 tests)
+├── test-day7.js                    # Day 7 automated verification test suite (63 tests)
 ├── test-day8.js                    # Day 8 automated verification test suite (71 tests)
 ├── test-day9.js                    # Day 9 automated database integration test suite (61 tests)
+├── test-day10.js                   # Day 10 automated persistence test suite (88 tests)
+├── test-day11.js                   # Day 11 automated management test suite (83 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -95,13 +105,17 @@ DevProbe/
 
 DevProbe adheres to a structured, layered architecture:
 
-- **`src/app.js`**: Bootstraps the Express application, configures security headers (`nosniff`, `DENY`), serves public assets, mounts API routes, provides application health check (`GET /api/health`) and database readiness check (`GET /api/health/db`), and manages graceful shutdown.
+- **`src/app.js`**: Bootstraps the Express application, configures security headers (`nosniff`, `DENY`), serves public assets, mounts API routes (`/api/requests`, `/api/collections`, `/api/requests/saved`), provides application health check (`GET /api/health`) and database readiness check (`GET /api/health/db`), and manages graceful shutdown.
 - **`src/config/database.js`**: Manages the MySQL connection pool singleton via `mysql2/promise`, reads configuration from environment variables, provides connectivity test and health check helpers, enforces parameterized query safety, and translates raw database errors into sanitized user-safe diagnostics.
 - **`src/config/security.js`**: Defines execution limits (timeouts, payload sizes, redirects), permitted methods/protocols, sensitive header classifications, hop-by-hop header lists, and SSRF defense logic (inspects hostnames, IPv4 ranges, IPv6 representations, IPv4-mapped IPv6, and cloud metadata addresses).
 - **`src/middleware/validateRequest.js`**: Validates incoming request payloads for both `/validate` and `/execute`. Rejects unsupported methods, malformed URLs, non-HTTP protocols, embedded credentials, restricted destinations, invalid RFC 7230 headers, and oversized payloads.
 - **`src/middleware/errorHandler.js`**: Intercepts JSON syntax errors, payload size limits (413), validation errors (400), unknown routes (404), and upstream network errors. Guarantees consistent JSON error structures and prevents leakage of internal stack traces, filesystem paths, or secrets.
 - **`src/services/requestService.js`**: Implements the real outbound HTTP/HTTPS execution engine with DNS pre-resolution, socket-level connection pinning, manual redirect loop with cross-origin credential stripping, streaming response size caps, and monotonic latency measurement. Also provides the preparation-only normalization service for `/validate`.
 - **`src/controllers/requestController.js`**: Handles incoming API requests for validation and execution, delegating to `requestService` and returning structured responses.
+- **`src/services/collectionService.js`**: Provides collection business logic: creating collections, querying all collections or single collection by ID, updating name and description, and deleting collections safely while preserving child requests by setting `collection_id = NULL`.
+- **`src/controllers/collectionController.js`**: Handles collection HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
+- **`src/services/savedRequestService.js`**: Manages saved request persistence: validation, header and credential scrubbing (stripping tokens, passwords, cookies), creating, listing with optional `collectionId` filter, fetching by ID, updating request definitions, and deleting saved requests.
+- **`src/controllers/savedRequestController.js`**: Handles saved request HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
 
 ## 🔒 Security Architecture & SSRF Defenses
 
@@ -250,7 +264,7 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
   }
   ```
 
-### 5. Collections API (Day 10)
+### 5. Collections API (Day 10 & Day 11)
 - **List Collections**: `GET /api/collections`
   - **Status**: `200 OK`
   - **Response**:
@@ -276,7 +290,16 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
 - **Retrieve Collection by ID**: `GET /api/collections/:id`
   - **Status**: `200 OK` or `404 Not Found`
 
-### 6. Saved Requests API (Day 10)
+- **Update Collection (Day 11)**: `PUT /api/collections/:id`
+  - **Status**: `200 OK`
+  - **Body**: `{ "name": "Updated Collection Name", "description": "Updated notes" }`
+  - **Validation**: Requires string name between 1 and 255 characters. Returns 404 if collection not found.
+
+- **Delete Collection (Day 11)**: `DELETE /api/collections/:id`
+  - **Status**: `200 OK`
+  - **Safe Disassociation**: Deletes the collection while safely keeping child requests (`UPDATE saved_requests SET collection_id = NULL WHERE collection_id = ?`). The requests remain accessible as unassigned requests. Returns 404 if collection not found.
+
+### 6. Saved Requests API (Day 10 & Day 11)
 - **List Saved Requests**: `GET /api/requests/saved`
   - **Query Filter**: Optional `?collectionId=<id>` to retrieve requests belonging to a specific collection.
   - **Status**: `200 OK`
@@ -324,7 +347,29 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
 - **Retrieve Saved Request by ID**: `GET /api/requests/saved/:id`
   - **Status**: `200 OK` or `404 Not Found`
 
-### 4. Execution Error Response Format
+- **Update Saved Request (Day 11)**: `PUT /api/requests/saved/:id`
+  - **Status**: `200 OK`
+  - **Example Request Body**:
+    ```json
+    {
+      "name": "Updated Post Item",
+      "collection_id": 2,
+      "method": "PUT",
+      "url": "https://jsonplaceholder.typicode.com/posts/1",
+      "headers": [{ "key": "Content-Type", "value": "application/json" }],
+      "params": [],
+      "body": "{\"title\":\"Updated Title\"}",
+      "body_type": "json",
+      "auth": { "type": "bearer", "bearerToken": "secret-stripped" }
+    }
+    ```
+  - **Validation & Scrubbing**: Validates request name, HTTP method, valid HTTP/HTTPS URL, and foreign key collection ID. Strips sensitive tokens/passwords/cookies so secrets are never saved to MySQL.
+
+- **Delete Saved Request (Day 11)**: `DELETE /api/requests/saved/:id`
+  - **Status**: `200 OK`
+  - **Behavior**: Permanently deletes the specified saved request record. Returns 404 if request does not exist. Leaves all other requests and collections intact.
+
+### 7. Execution Error Response Format
 When destination validation fails or limits are exceeded, a structured error is returned:
 ```json
 {
@@ -446,21 +491,22 @@ curl http://localhost:3000/api/health/db
 
 ## 🧪 Automated Testing
 
-DevProbe features a multi-tiered automated test suite with **517 passing tests** across 8 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections, and saved requests persistence:
+DevProbe features a multi-tiered automated test suite with **653 passing tests** across 9 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, and complete collection/saved request management:
 
 ```bash
-# Run all test suites (Day 3 through Day 10 — 517 total tests)
+# Run all test suites (Day 3 through Day 11 — 653 total tests)
 npm test
 
 # Run individual test suites
 npm run test:day3    # Day 3: Frontend state & parameter parsing (34 tests)
 npm run test:day4    # Day 4: Backend validation & SSRF defense (67 tests)
 npm run test:day5    # Day 5: Real HTTP execution & socket pinning (68 tests)
-npm run test:day6    # Day 6: Response viewer & formatting states (65 tests)
+npm run test:day6    # Day 6: Response viewer & formatting states (118 tests)
 npm run test:day7    # Day 7: Error handling & security headers (63 tests)
 npm run test:day8    # Day 8: Security hardening & IPv6 edge cases (71 tests)
 npm run test:day9    # Day 9: MySQL database integration (61 tests)
 npm run test:day10   # Day 10: Collections & saved requests persistence (88 tests)
+npm run test:day11   # Day 11: Saved request & collection management (83 tests)
 ```
 
 ### Day 10 Test Coverage (88 Tests)
@@ -476,6 +522,14 @@ npm run test:day10   # Day 10: Collections & saved requests persistence (88 test
 - **TEST G**: Parameterized SQL execution & injection resistance (`' OR '1'='1'`, `DROP TABLE`, `UNION SELECT` safely treated as string literals).
 - **TEST H**: Safe database error handling (readiness check does not expose passwords, errors formatted securely).
 - **TEST I**: Frontend non-dispatch verification (`convertSavedRequestToTemplate` and `loadRequestIntoState` safely populate the workspace editor and state without triggering outbound HTTP execution).
+
+### Day 11 Test Coverage (83 Tests)
+- **TEST A**: Collection update validation (rejects invalid IDs, missing collections 404, invalid names 400), valid updates (`PUT /api/collections/:id`), and SQL injection resistance.
+- **TEST B**: Collection safe deletion (`DELETE /api/collections/:id`), 404 handling for missing collections, and foreign key unassigning verification (`saved_requests.collection_id` set to `NULL`).
+- **TEST C**: Saved request update validation (rejects invalid IDs, 404 for missing request, invalid methods, non-HTTP URLs, embedded credentials, invalid collection IDs), payload updating, and secret credential stripping.
+- **TEST D**: Saved request deletion (`DELETE /api/requests/saved/:id`), 404 on subsequent lookups, and isolation of unrelated saved requests.
+- **TEST E**: Parameterized SQL execution & SQL injection resistance across all update and delete endpoints.
+- **TEST F**: Frontend non-dispatch verification and modal function exports (`openEditCollectionModal`, `openDeleteCollectionModal`, `openEditSavedRequestModal`, `openDeleteSavedRequestModal`, and non-dispatch on request selection).
 
 ### Database Troubleshooting
 
@@ -496,8 +550,9 @@ npm run test:day10   # Day 10: Collections & saved requests persistence (88 test
 | Days 7–8 | Advanced error handling, security hardening & response viewer clipping fix | Completed |
 | Day 9 | MySQL database connection pool, initial schema & health checks | Completed |
 | Day 10 | Collections and saved requests persistence with secret credential protection | Completed |
-| Days 11–12 | Authentication headers, environments & request history persistence | Planned |
-| Days 13–16 | Environment variables, automated tests, documentation, and final deployment | Planned |
+| Day 11 | Saved request & collection management (edit, delete, disassociation, modals) | Completed |
+| Day 12 | Environments & request history persistence | Planned |
+| Days 13–16 | Automated tests, documentation, and final deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -506,4 +561,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 10 complete. Persistent MySQL collections and saved requests implemented with `GET`/`POST /api/collections` and `GET`/`POST /api/requests/saved`, collection filtering, secret credential protection (purging passwords, bearer tokens, and session cookies), interactive workspace dialogs, safe request loading without execution dispatch, and 517 automated tests passing with zero regressions.
+**In Active Development** — Day 11 complete. Saved request and collection management fully implemented with `PUT`/`DELETE /api/collections/:id` and `PUT`/`DELETE /api/requests/saved/:id`, safe collection deletion with request disassociation (`ON DELETE SET NULL`), credential scrubbing, dark-theme management modals in the sidebar, safe non-dispatch request loading, and 653 automated tests passing with zero regressions.

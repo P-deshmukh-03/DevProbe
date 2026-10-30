@@ -2606,6 +2606,155 @@ let cachedCollections = [];
 let cachedSavedRequests = [];
 
 /**
+ * Opens the Edit Collection modal and populates it with collection details.
+ */
+function openEditCollectionModal(col) {
+  if (typeof document === 'undefined' || !col) return;
+  const modal = document.getElementById('modal-edit-collection');
+  const inputId = document.getElementById('input-edit-col-id');
+  const inputName = document.getElementById('input-edit-col-name');
+  const inputDesc = document.getElementById('input-edit-col-desc');
+
+  if (modal && inputId && inputName) {
+    inputId.value = col.id;
+    inputName.value = col.name || '';
+    if (inputDesc) inputDesc.value = col.description || '';
+    modal.classList.add('active');
+    inputName.focus();
+  }
+}
+
+/**
+ * Opens the Delete Collection confirmation dialog.
+ */
+function openDeleteCollectionModal(col) {
+  if (typeof document === 'undefined' || !col) return;
+  const modal = document.getElementById('modal-delete-collection');
+  const inputId = document.getElementById('input-del-col-id');
+  const warningText = document.getElementById('delete-col-warning-text');
+
+  if (modal && inputId) {
+    inputId.value = col.id;
+    if (warningText) {
+      warningText.textContent = `Are you sure you want to delete collection "${col.name}"?`;
+    }
+    modal.classList.add('active');
+  }
+}
+
+/**
+ * Opens the Edit Saved Request modal and populates it with saved request details.
+ */
+function openEditSavedRequestModal(req) {
+  if (typeof document === 'undefined' || !req) return;
+  const modal = document.getElementById('modal-edit-saved-request');
+  const inputId = document.getElementById('input-edit-req-id');
+  const inputName = document.getElementById('input-edit-req-name');
+  const selectCol = document.getElementById('select-edit-req-collection');
+  const selectMethod = document.getElementById('select-edit-req-method');
+  const inputUrl = document.getElementById('input-edit-req-url');
+  const checkSync = document.getElementById('check-sync-active-config');
+
+  if (modal && inputId && inputName && inputUrl) {
+    inputId.value = req.id;
+    inputName.value = req.name || '';
+    if (selectCol) selectCol.value = req.collection_id !== null && req.collection_id !== undefined ? String(req.collection_id) : '';
+    if (selectMethod) selectMethod.value = req.method || 'GET';
+    inputUrl.value = req.url || '';
+    if (checkSync) checkSync.checked = false;
+    modal.classList.add('active');
+    inputName.focus();
+  }
+}
+
+/**
+ * Opens the Delete Saved Request confirmation dialog.
+ */
+function openDeleteSavedRequestModal(req) {
+  if (typeof document === 'undefined' || !req) return;
+  const modal = document.getElementById('modal-delete-saved-request');
+  const inputId = document.getElementById('input-del-req-id');
+  const warningText = document.getElementById('delete-req-warning-text');
+
+  if (modal && inputId) {
+    inputId.value = req.id;
+    if (warningText) {
+      warningText.textContent = `Are you sure you want to delete saved request "${req.name}"? This action cannot be undone.`;
+    }
+    modal.classList.add('active');
+  }
+}
+
+/**
+ * Creates a DOM row for a saved request containing the request item and action buttons.
+ */
+function createSavedRequestRow(req) {
+  const row = document.createElement('div');
+  row.className = 'saved-request-row';
+
+  const btn = document.createElement('button');
+  btn.className = 'request-item';
+  btn.setAttribute('data-id', `saved-${req.id}`);
+  btn.setAttribute('data-saved-id', req.id);
+  btn.setAttribute('data-method', req.method);
+  btn.setAttribute('data-name', req.name);
+  btn.setAttribute('data-url', req.url);
+
+  const mLower = (req.method || 'get').toLowerCase();
+  btn.innerHTML = `
+    <span class="method-badge method-${mLower}">${escapeHtml(req.method)}</span>
+    <span class="request-name">${escapeHtml(req.name)}</span>
+  `;
+
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Populate request editor without executing outbound HTTP (non-dispatch guarantee)
+    const template = convertSavedRequestToTemplate(req);
+    loadRequestIntoState(template);
+    resetResponseViewer();
+    updateUrlPreview();
+
+    showToast('Request Selected', `Loaded "${req.name}" into workspace.`, 'info');
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'item-actions';
+  actions.innerHTML = `
+    <button class="btn-item-action btn-action-edit-req" title="Edit request" aria-label="Edit request">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+      </svg>
+    </button>
+    <button class="btn-item-action btn-action-delete btn-action-del-req" title="Delete request" aria-label="Delete request">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    </button>
+  `;
+
+  const btnEdit = actions.querySelector('.btn-action-edit-req');
+  const btnDel = actions.querySelector('.btn-action-del-req');
+
+  btnEdit.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openEditSavedRequestModal(req);
+  });
+
+  btnDel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openDeleteSavedRequestModal(req);
+  });
+
+  row.appendChild(btn);
+  row.appendChild(actions);
+  return row;
+}
+
+/**
  * Converts a database saved request row into the editor template format.
  * Strictly guarantees that sensitive credentials are never injected.
  */
@@ -2673,6 +2822,7 @@ async function loadCollectionsAndSavedRequests() {
 
   const container = document.getElementById('custom-collections-container');
   const collectionSelect = document.getElementById('select-save-collection');
+  const editCollectionSelect = document.getElementById('select-edit-req-collection');
 
   try {
     const [colRes, reqRes] = await Promise.all([
@@ -2690,16 +2840,18 @@ async function loadCollectionsAndSavedRequests() {
       cachedSavedRequests = reqData.data;
     }
 
-    // Update collection dropdown in Save Modal
-    if (collectionSelect) {
-      collectionSelect.innerHTML = '<option value="">-- No Collection (Unassigned) --</option>';
-      cachedCollections.forEach((c) => {
-        const opt = document.createElement('option');
-        opt.value = c.id;
-        opt.textContent = c.name;
-        collectionSelect.appendChild(opt);
-      });
-    }
+    // Update collection dropdowns in Save and Edit Modals
+    [collectionSelect, editCollectionSelect].forEach((selectEl) => {
+      if (selectEl) {
+        selectEl.innerHTML = '<option value="">-- No Collection (Unassigned) --</option>';
+        cachedCollections.forEach((c) => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.name;
+          selectEl.appendChild(opt);
+        });
+      }
+    });
 
     // Render collections and saved requests in sidebar
     if (container) {
@@ -2723,20 +2875,54 @@ async function loadCollectionsAndSavedRequests() {
         headerEl.setAttribute('tabindex', '0');
         headerEl.setAttribute('aria-expanded', 'true');
         headerEl.innerHTML = `
-          <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-          <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-          </svg>
-          <span class="folder-title">${escapeHtml(col.name)}</span>
-          <span class="folder-badge" title="${colRequests.length} saved requests">${colRequests.length}</span>
+          <div class="folder-header-title">
+            <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+            <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="folder-title">${escapeHtml(col.name)}</span>
+            <span class="folder-badge" title="${colRequests.length} saved requests">${colRequests.length}</span>
+          </div>
+          <div class="folder-actions">
+            <button class="btn-item-action btn-action-edit-col" title="Edit collection" aria-label="Edit collection">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+            <button class="btn-item-action btn-action-delete btn-action-del-col" title="Delete collection" aria-label="Delete collection">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
         `;
 
-        headerEl.addEventListener('click', () => {
+        headerEl.addEventListener('click', (e) => {
+          if (e.target.closest('.folder-actions')) return;
           const isCollapsed = folderEl.classList.toggle('collapsed');
           headerEl.setAttribute('aria-expanded', (!isCollapsed).toString());
         });
+
+        const btnEditCol = headerEl.querySelector('.btn-action-edit-col');
+        const btnDelCol = headerEl.querySelector('.btn-action-del-col');
+
+        if (btnEditCol) {
+          btnEditCol.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEditCollectionModal(col);
+          });
+        }
+
+        if (btnDelCol) {
+          btnDelCol.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openDeleteCollectionModal(col);
+          });
+        }
 
         const itemsEl = document.createElement('div');
         itemsEl.className = 'folder-items';
@@ -2748,34 +2934,7 @@ async function loadCollectionsAndSavedRequests() {
           itemsEl.appendChild(emptyEl);
         } else {
           colRequests.forEach((req) => {
-            const btn = document.createElement('button');
-            btn.className = 'request-item';
-            btn.setAttribute('data-id', `saved-${req.id}`);
-            btn.setAttribute('data-saved-id', req.id);
-            btn.setAttribute('data-method', req.method);
-            btn.setAttribute('data-name', req.name);
-            btn.setAttribute('data-url', req.url);
-
-            const mLower = req.method.toLowerCase();
-            btn.innerHTML = `
-              <span class="method-badge method-${mLower}">${escapeHtml(req.method)}</span>
-              <span class="request-name">${escapeHtml(req.name)}</span>
-            `;
-
-            btn.addEventListener('click', () => {
-              document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
-              btn.classList.add('active');
-
-              // Populate request editor without executing outbound HTTP
-              const template = convertSavedRequestToTemplate(req);
-              loadRequestIntoState(template);
-              resetResponseViewer();
-              updateUrlPreview();
-
-              showToast('Request Selected', `Loaded "${req.name}" into workspace.`, 'info');
-            });
-
-            itemsEl.appendChild(btn);
+            itemsEl.appendChild(createSavedRequestRow(req));
           });
         }
 
@@ -2791,48 +2950,24 @@ async function loadCollectionsAndSavedRequests() {
         unassignedFolder.className = 'collection-folder open';
         unassignedFolder.innerHTML = `
           <div class="folder-header" role="button" tabindex="0" aria-expanded="true">
-            <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-            <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-              <polyline points="17 21 17 13 7 13 7 21"></polyline>
-            </svg>
-            <span class="folder-title">Saved Requests</span>
-            <span class="folder-badge">${unassignedRequests.length}</span>
+            <div class="folder-header-title">
+              <svg class="folder-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+              <svg class="folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              </svg>
+              <span class="folder-title">Saved Requests</span>
+              <span class="folder-badge">${unassignedRequests.length}</span>
+            </div>
           </div>
         `;
         const unassignedItems = document.createElement('div');
         unassignedItems.className = 'folder-items';
 
         unassignedRequests.forEach((req) => {
-          const btn = document.createElement('button');
-          btn.className = 'request-item';
-          btn.setAttribute('data-id', `saved-${req.id}`);
-          btn.setAttribute('data-saved-id', req.id);
-          btn.setAttribute('data-method', req.method);
-          btn.setAttribute('data-name', req.name);
-          btn.setAttribute('data-url', req.url);
-
-          const mLower = req.method.toLowerCase();
-          btn.innerHTML = `
-            <span class="method-badge method-${mLower}">${escapeHtml(req.method)}</span>
-            <span class="request-name">${escapeHtml(req.name)}</span>
-          `;
-
-          btn.addEventListener('click', () => {
-            document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            const template = convertSavedRequestToTemplate(req);
-            loadRequestIntoState(template);
-            resetResponseViewer();
-            updateUrlPreview();
-
-            showToast('Request Selected', `Loaded "${req.name}" into workspace.`, 'info');
-          });
-
-          unassignedItems.appendChild(btn);
+          unassignedItems.appendChild(createSavedRequestRow(req));
         });
 
         const unassignedHeader = unassignedFolder.querySelector('.folder-header');
@@ -2851,12 +2986,12 @@ async function loadCollectionsAndSavedRequests() {
 }
 
 /**
- * Initializes dialogs and handlers for creating collections and saving requests.
+ * Initializes dialogs and handlers for creating, editing, and deleting collections and saved requests.
  */
 function initPersistentCollections() {
   if (typeof document === 'undefined') return;
 
-  // New Collection Modal elements
+  // 1. New Collection Modal
   const modalCol = document.getElementById('modal-new-collection');
   const btnNewCol = document.getElementById('btn-new-collection');
   const btnColClose = document.getElementById('btn-col-modal-close');
@@ -2882,12 +3017,6 @@ function initPersistentCollections() {
   if (btnNewCol) btnNewCol.addEventListener('click', openColModal);
   if (btnColClose) btnColClose.addEventListener('click', closeColModal);
   if (btnColCancel) btnColCancel.addEventListener('click', closeColModal);
-
-  if (modalCol) {
-    modalCol.addEventListener('click', (e) => {
-      if (e.target === modalCol) closeColModal();
-    });
-  }
 
   if (formNewCol) {
     formNewCol.addEventListener('submit', async (e) => {
@@ -2926,7 +3055,104 @@ function initPersistentCollections() {
     });
   }
 
-  // Save Request Modal elements
+  // 2. Edit Collection Modal
+  const modalEditCol = document.getElementById('modal-edit-collection');
+  const btnEditColClose = document.getElementById('btn-edit-col-close');
+  const btnEditColCancel = document.getElementById('btn-edit-col-cancel');
+  const formEditCol = document.getElementById('form-edit-collection');
+  const inputEditColId = document.getElementById('input-edit-col-id');
+  const inputEditColName = document.getElementById('input-edit-col-name');
+  const inputEditColDesc = document.getElementById('input-edit-col-desc');
+  const btnEditColSubmit = document.getElementById('btn-edit-col-submit');
+
+  const closeEditColModal = () => {
+    if (modalEditCol) modalEditCol.classList.remove('active');
+  };
+
+  if (btnEditColClose) btnEditColClose.addEventListener('click', closeEditColModal);
+  if (btnEditColCancel) btnEditColCancel.addEventListener('click', closeEditColModal);
+
+  if (formEditCol) {
+    formEditCol.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = inputEditColId?.value;
+      const name = (inputEditColName?.value || '').trim();
+      const desc = (inputEditColDesc?.value || '').trim();
+
+      if (!name) {
+        showToast('Validation Error', 'Collection name is required.', 'warning');
+        return;
+      }
+
+      if (btnEditColSubmit) btnEditColSubmit.disabled = true;
+
+      try {
+        const res = await fetch(`/api/collections/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, description: desc || null })
+        });
+        const data = await res.json();
+
+        if (res.status === 200 && data.success) {
+          closeEditColModal();
+          showToast('Collection Updated', `Updated collection "${data.data.name}".`, 'success');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to update collection';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        if (btnEditColSubmit) btnEditColSubmit.disabled = false;
+      }
+    });
+  }
+
+  // 3. Delete Collection Confirmation Modal
+  const modalDelCol = document.getElementById('modal-delete-collection');
+  const btnDelColClose = document.getElementById('btn-del-col-close');
+  const btnDelColCancel = document.getElementById('btn-del-col-cancel');
+  const btnDelColConfirm = document.getElementById('btn-del-col-confirm');
+  const inputDelColId = document.getElementById('input-del-col-id');
+
+  const closeDelColModal = () => {
+    if (modalDelCol) modalDelCol.classList.remove('active');
+  };
+
+  if (btnDelColClose) btnDelColClose.addEventListener('click', closeDelColModal);
+  if (btnDelColCancel) btnDelColCancel.addEventListener('click', closeDelColModal);
+
+  if (btnDelColConfirm) {
+    btnDelColConfirm.addEventListener('click', async () => {
+      const id = inputDelColId?.value;
+      if (!id) return;
+
+      btnDelColConfirm.disabled = true;
+      try {
+        const res = await fetch(`/api/collections/${id}`, {
+          method: 'DELETE'
+        });
+        const data = await res.json();
+
+        if (res.status === 200 && data.success) {
+          closeDelColModal();
+          showToast('Collection Deleted', 'Collection removed. Saved requests are preserved as unassigned.', 'info');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to delete collection';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        btnDelColConfirm.disabled = false;
+      }
+    });
+  }
+
+  // 4. Save Request Modal (Create)
   const modalSave = document.getElementById('modal-save-request');
   const btnSave = document.getElementById('btn-save-request');
   const btnSaveClose = document.getElementById('btn-save-modal-close');
@@ -2955,12 +3181,6 @@ function initPersistentCollections() {
   if (btnSaveClose) btnSaveClose.addEventListener('click', closeSaveModal);
   if (btnSaveCancel) btnSaveCancel.addEventListener('click', closeSaveModal);
 
-  if (modalSave) {
-    modalSave.addEventListener('click', (e) => {
-      if (e.target === modalSave) closeSaveModal();
-    });
-  }
-
   if (formSave) {
     formSave.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -2975,7 +3195,6 @@ function initPersistentCollections() {
 
       if (btnSaveSubmit) btnSaveSubmit.disabled = true;
 
-      // Extract current active request state
       const payload = {
         name: reqName,
         collection_id: collection_id,
@@ -3016,11 +3235,162 @@ function initPersistentCollections() {
     });
   }
 
-  // Keyboard shortcut: Escape closes active modals
+  // 5. Edit Saved Request Modal
+  const modalEditReq = document.getElementById('modal-edit-saved-request');
+  const btnEditReqClose = document.getElementById('btn-edit-req-close');
+  const btnEditReqCancel = document.getElementById('btn-edit-req-cancel');
+  const formEditReq = document.getElementById('form-edit-saved-request');
+  const inputEditReqId = document.getElementById('input-edit-req-id');
+  const inputEditReqName = document.getElementById('input-edit-req-name');
+  const selectEditReqCol = document.getElementById('select-edit-req-collection');
+  const selectEditReqMethod = document.getElementById('select-edit-req-method');
+  const inputEditReqUrl = document.getElementById('input-edit-req-url');
+  const checkSyncActiveConfig = document.getElementById('check-sync-active-config');
+  const btnEditReqSubmit = document.getElementById('btn-edit-req-submit');
+
+  const closeEditReqModal = () => {
+    if (modalEditReq) modalEditReq.classList.remove('active');
+  };
+
+  if (btnEditReqClose) btnEditReqClose.addEventListener('click', closeEditReqModal);
+  if (btnEditReqCancel) btnEditReqCancel.addEventListener('click', closeEditReqModal);
+
+  if (formEditReq) {
+    formEditReq.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = inputEditReqId?.value;
+      const reqName = (inputEditReqName?.value || '').trim();
+      const colIdVal = selectEditReqCol?.value;
+      const collection_id = colIdVal ? parseInt(colIdVal, 10) : null;
+      const method = selectEditReqMethod?.value || 'GET';
+      const url = (inputEditReqUrl?.value || '').trim();
+
+      if (!reqName) {
+        showToast('Validation Error', 'Request name is required.', 'warning');
+        return;
+      }
+      if (!url) {
+        showToast('Validation Error', 'Request URL is required.', 'warning');
+        return;
+      }
+
+      if (btnEditReqSubmit) btnEditReqSubmit.disabled = true;
+
+      // Determine headers, params, body, auth
+      const existingReq = cachedSavedRequests.find((r) => String(r.id) === String(id));
+      let headers = existingReq?.headers || [];
+      let params = existingReq?.params || [];
+      let body = existingReq?.body || '';
+      let body_type = existingReq?.body_type || 'none';
+      let auth_type = existingReq?.auth_type || 'none';
+
+      // If user opted to update with current active workspace configuration
+      if (checkSyncActiveConfig?.checked) {
+        headers = Array.isArray(activeRequest.headers) ? activeRequest.headers : [];
+        params = Array.isArray(activeRequest.params) ? activeRequest.params : [];
+        body = activeRequest.body ? activeRequest.body.text : '';
+        body_type = activeRequest.body ? activeRequest.body.type : 'none';
+        auth_type = activeRequest.auth ? activeRequest.auth.type : 'none';
+      }
+
+      const payload = {
+        name: reqName,
+        collection_id,
+        method,
+        url,
+        headers,
+        params,
+        body,
+        body_type,
+        auth_type
+      };
+
+      try {
+        const res = await fetch(`/api/requests/saved/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (res.status === 200 && data.success) {
+          // If the edited request is the currently loaded request, update activeRequest name
+          if (activeRequest.id === `saved-${id}` || activeRequest.name === existingReq?.name) {
+            activeRequest.name = reqName;
+            const tabTitle = document.getElementById('tab-title-label');
+            if (tabTitle) tabTitle.textContent = reqName;
+          }
+
+          closeEditReqModal();
+          showToast('Request Updated', `Updated saved request "${data.data.name}".`, 'success');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to update request';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        if (btnEditReqSubmit) btnEditReqSubmit.disabled = false;
+      }
+    });
+  }
+
+  // 6. Delete Saved Request Confirmation Modal
+  const modalDelReq = document.getElementById('modal-delete-saved-request');
+  const btnDelReqClose = document.getElementById('btn-del-req-close');
+  const btnDelReqCancel = document.getElementById('btn-del-req-cancel');
+  const btnDelReqConfirm = document.getElementById('btn-del-req-confirm');
+  const inputDelReqId = document.getElementById('input-del-req-id');
+
+  const closeDelReqModal = () => {
+    if (modalDelReq) modalDelReq.classList.remove('active');
+  };
+
+  if (btnDelReqClose) btnDelReqClose.addEventListener('click', closeDelReqModal);
+  if (btnDelReqCancel) btnDelReqCancel.addEventListener('click', closeDelReqModal);
+
+  if (btnDelReqConfirm) {
+    btnDelReqConfirm.addEventListener('click', async () => {
+      const id = inputDelReqId?.value;
+      if (!id) return;
+
+      btnDelReqConfirm.disabled = true;
+      try {
+        const res = await fetch(`/api/requests/saved/${id}`, {
+          method: 'DELETE'
+        });
+        const data = await res.json();
+
+        if (res.status === 200 && data.success) {
+          closeDelReqModal();
+          showToast('Request Deleted', 'Saved request deleted successfully.', 'info');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const msg = data.error?.message || data.message || 'Failed to delete request';
+          showToast('Error', msg, 'warning');
+        }
+      } catch (err) {
+        showToast('Connection Error', `Failed to contact server: ${err.message}`, 'warning');
+      } finally {
+        btnDelReqConfirm.disabled = false;
+      }
+    });
+  }
+
+  // Close modals when clicking overlay background
+  [modalCol, modalEditCol, modalDelCol, modalSave, modalEditReq, modalDelReq].forEach((m) => {
+    if (m) {
+      m.addEventListener('click', (e) => {
+        if (e.target === m) m.classList.remove('active');
+      });
+    }
+  });
+
+  // Keyboard shortcut: Escape closes all active modals
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      closeColModal();
-      closeSaveModal();
+      document.querySelectorAll('.modal-overlay.active').forEach((m) => m.classList.remove('active'));
     }
   });
 
@@ -3067,6 +3437,11 @@ if (typeof window !== 'undefined') {
     convertSavedRequestToTemplate,
     loadCollectionsAndSavedRequests,
     initPersistentCollections,
+    openEditCollectionModal,
+    openDeleteCollectionModal,
+    openEditSavedRequestModal,
+    openDeleteSavedRequestModal,
+    createSavedRequestRow,
     getCachedCollections: () => cachedCollections,
     getCachedSavedRequests: () => cachedSavedRequests
   };
@@ -3106,6 +3481,11 @@ if (typeof module !== 'undefined' && module.exports) {
     convertSavedRequestToTemplate,
     loadCollectionsAndSavedRequests,
     initPersistentCollections,
+    openEditCollectionModal,
+    openDeleteCollectionModal,
+    openEditSavedRequestModal,
+    openDeleteSavedRequestModal,
+    createSavedRequestRow,
     getCachedCollections: () => cachedCollections,
     getCachedSavedRequests: () => cachedSavedRequests
   };

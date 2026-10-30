@@ -27,5 +27,17 @@ router.get('/:id', collectionController.getCollectionById);
  */
 router.post('/', collectionController.createCollection);
 
+/**
+ * PUT /api/collections/:id
+ * Update an existing collection
+ */
+router.put('/:id', collectionController.updateCollection);
+
+/**
+ * DELETE /api/collections/:id
+ * Delete a collection safely
+ */
+router.delete('/:id', collectionController.deleteCollection);
+
 module.exports = router;
 
