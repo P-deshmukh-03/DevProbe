@@ -14,6 +14,7 @@
 const http = require('http');
 const net = require('net');
 const app = require('./src/app.js');
+const { closePool } = require('./src/config/database');
 const {
   validateTargetUrl,
   resolveAndValidateDestination,
@@ -527,9 +528,17 @@ async function runTests() {
     assert(copyEmptyResult === false, 'TEST H6: copyTextToClipboard handles empty string');
 
   } finally {
-    await new Promise(resolve => appServer.close(resolve));
-    await new Promise(resolve => mockServer1.close(resolve));
-    await new Promise(resolve => mockServer2.close(resolve));
+    // Clean up servers and MySQL connection pool in order
+    if (appServer) {
+      await new Promise(resolve => appServer.close(resolve));
+    }
+    if (mockServer1) {
+      await new Promise(resolve => mockServer1.close(resolve));
+    }
+    if (mockServer2) {
+      await new Promise(resolve => mockServer2.close(resolve));
+    }
+    await closePool();
   }
 
   console.log('\n===========================================');

@@ -5,6 +5,8 @@
 -- This schema establishes the relational database structure for DevProbe persistence:
 -- - Collections: Logical grouping of saved API requests
 -- - Saved Requests: Request configuration including method, URL, headers, params, body
+-- - Environments & Variables: Environment configurations, variables, and AES-256-GCM secrets
+-- - Request History: Persistent execution history for dispatched API requests and upstream responses
 --
 -- Compatibility: MySQL 5.7+ / MySQL 8.0+ / MariaDB 10.4+ (XAMPP compatible)
 -- Character Set: utf8mb4 (Full Unicode support including emojis and special symbols)
@@ -103,5 +105,30 @@ CREATE TABLE IF NOT EXISTS `environment_variables` (
     ON DELETE CASCADE
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------------------------------
+-- Table: request_history
+-- Day 13: Persistent execution history for API requests and upstream responses
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `request_history` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `request_name` VARCHAR(255) NULL,
+  `method` VARCHAR(10) NOT NULL,
+  `url` TEXT NOT NULL,
+  `request_headers` JSON NULL,
+  `request_body` MEDIUMTEXT NULL,
+  `response_status` INT NULL,
+  `response_headers` JSON NULL,
+  `response_body` MEDIUMTEXT NULL,
+  `response_body_truncated` BOOLEAN NOT NULL DEFAULT FALSE,
+  `response_time` INT UNSIGNED NULL,
+  `error_message` TEXT NULL,
+  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_history_created_at` (`created_at`),
+  INDEX `idx_history_method` (`method`),
+  INDEX `idx_history_status` (`response_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 

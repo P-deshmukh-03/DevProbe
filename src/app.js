@@ -6,6 +6,7 @@ const path = require('path');
 const requestRoutes = require('./routes/requestRoutes');
 const collectionRoutes = require('./routes/collectionRoutes');
 const environmentRoutes = require('./routes/environmentRoutes');
+const historyRoutes = require('./routes/historyRoutes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { EXECUTION_LIMITS } = require('./config/security');
 const { checkDatabaseHealth, closePool } = require('./config/database');
@@ -60,10 +61,11 @@ app.get('/api/health/db', async (req, res) => {
   }
 });
 
-// API Routes (Days 4–12)
+// API Routes (Days 4–13)
 app.use('/api/collections', collectionRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/environments', environmentRoutes);
+app.use('/api/history', historyRoutes);
 
 // Homepage route
 app.get('/', (req, res) => {

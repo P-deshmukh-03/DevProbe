@@ -17,6 +17,7 @@
 const http = require('http');
 const net = require('net');
 const app = require('./src/app.js');
+const { closePool } = require('./src/config/database');
 const {
   activeRequest,
   activeResponse,
@@ -543,8 +544,14 @@ async function runTests() {
     assert(invalidJson.isValid === false, 'TEST H: Invalid JSON fails validation gracefully');
 
   } finally {
-    await new Promise((resolve) => appServer.close(resolve));
-    await new Promise((resolve) => mockUpstreamServer.close(resolve));
+    // Clean up servers and MySQL connection pool in order
+    if (appServer) {
+      await new Promise((resolve) => appServer.close(resolve));
+    }
+    if (mockUpstreamServer) {
+      await new Promise((resolve) => mockUpstreamServer.close(resolve));
+    }
+    await closePool();
   }
 
   console.log('\n===========================================');

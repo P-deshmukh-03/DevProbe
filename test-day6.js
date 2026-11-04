@@ -17,6 +17,7 @@
 
 const http = require('http');
 const app = require('./src/app.js');
+const { closePool } = require('./src/config/database');
 const {
   activeRequest,
   activeResponse,
@@ -557,23 +558,26 @@ async function runTests() {
     assert(typeof formatHeadersForCopy === 'function', 'TEST M: formatHeadersForCopy function exported');
     assert(typeof copyTextToClipboard === 'function', 'TEST M: copyTextToClipboard function exported');
 
-    // Clean up servers
-    await new Promise((resolve) => appServer.close(resolve));
-    await new Promise((resolve) => mockUpstreamServer.close(resolve));
-
-    console.log('\n===========================================');
-    console.log(`Test Results: ${passedTests}/${totalTests} Passed`);
-    console.log('===========================================\n');
-
   } catch (err) {
     console.error('Fatal error during test execution:', err);
     process.exitCode = 1;
-    try {
-      appServer.close();
-      mockUpstreamServer.close();
-    } catch {
-      // ignore
+  } finally {
+    // Clean up servers and MySQL connection pool in order
+    if (appServer) {
+      await new Promise((resolve) => appServer.close(resolve));
     }
+    if (mockUpstreamServer) {
+      await new Promise((resolve) => mockUpstreamServer.close(resolve));
+    }
+    await closePool();
+  }
+
+  console.log('\n===========================================');
+  console.log(`Test Results: ${passedTests}/${totalTests} Passed`);
+  console.log('===========================================\n');
+
+  if (passedTests !== totalTests) {
+    process.exitCode = 1;
   }
 }
 
