@@ -1252,8 +1252,16 @@ if (typeof document !== 'undefined') {
   // 10. Environment Management & Variables (Day 12)
   initEnvironmentManagement();
 
-  // 11. Initial state render
+  // 11. Request History & Execution Management (Day 13)
+  initHistoryManagement();
+
+  // 12. Initial state render
   renderActiveRequestToUI();
+  });
+
+  // Independent event listener for History initialization to ensure decoupling from other components
+  document.addEventListener('DOMContentLoaded', () => {
+    initHistoryManagement();
   });
 }
 
@@ -1466,6 +1474,10 @@ function initTabs() {
  * Sidebar Navigation (Search filter, Folder collapse, Sample requests, Sidebar drawer)
  */
 function initSidebar() {
+  if (typeof document === 'undefined') return;
+
+  const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
+
   // Folder Toggle (Demo Collection)
   const folderToggle = document.getElementById('folder-toggle-btn');
   const folder = document.getElementById('demo-collection-folder');
@@ -1493,7 +1505,7 @@ function initSidebar() {
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       const query = searchInput.value.toLowerCase().trim();
-      const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
+      const currentRequestButtons = document.querySelectorAll('.sidebar-content .request-item');
 
       if (query.length > 0) {
         if (btnClearSearch) btnClearSearch.classList.remove('hidden');
@@ -1502,7 +1514,7 @@ function initSidebar() {
       }
 
       let visibleCount = 0;
-      requestButtons.forEach((btn) => {
+      currentRequestButtons.forEach((btn) => {
         const name = (btn.getAttribute('data-name') || '').toLowerCase();
         const url = (btn.getAttribute('data-url') || '').toLowerCase();
         const method = (btn.getAttribute('data-method') || '').toLowerCase();
@@ -1528,8 +1540,8 @@ function initSidebar() {
       btnClearSearch.addEventListener('click', () => {
         searchInput.value = '';
         btnClearSearch.classList.add('hidden');
-        const requestButtons = document.querySelectorAll('.sidebar-content .request-item');
-        requestButtons.forEach((btn) => (btn.style.display = 'flex'));
+        const currentRequestButtons = document.querySelectorAll('.sidebar-content .request-item');
+        currentRequestButtons.forEach((btn) => (btn.style.display = 'flex'));
         if (noResultsMsg) noResultsMsg.classList.add('hidden');
         searchInput.focus();
       });
@@ -1539,7 +1551,7 @@ function initSidebar() {
   // Sample Request Click Handling
   requestButtons.forEach((btn) => {
     btn.addEventListener('click', () => {
-      requestButtons.forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('.sidebar-content .request-item').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
 
       const reqId = btn.getAttribute('data-id');
@@ -2575,6 +2587,16 @@ async function handleSendRequest() {
       btnSend.disabled = false;
       btnSend.classList.remove('loading');
       btnSend.innerHTML = originalBtnHtml;
+    }
+    // Refresh history list to display the newly recorded execution
+    if (typeof fetchHistoryList === 'function') {
+      setTimeout(() => {
+        try {
+          fetchHistoryList(1);
+        } catch {
+          // ignore in testing
+        }
+      }, 150);
     }
   }
 }
@@ -4130,6 +4152,581 @@ function initEnvironmentManagement() {
 }
 
 /* ==========================================================================
+   12. Request History & Execution Management (Day 13)
+   ========================================================================== */
+
+let historyCurrentPage = 1;
+const historyPageLimit = 20;
+let historyTotalRecords = 0;
+let historyTotalPages = 1;
+let cachedHistoryItems = [];
+let selectedHistoryRecord = null;
+
+/**
+ * Fetches paginated execution history from GET /api/history
+ */
+async function fetchHistoryList(page = 1) {
+  if (typeof document === 'undefined') return;
+
+  historyCurrentPage = Math.max(1, parseInt(page, 10) || 1);
+
+  const loadingSpinner = document.getElementById('history-loading-indicator');
+  const errorState = document.getElementById('history-error-state');
+  const emptyState = document.getElementById('history-empty-state');
+  const listContainer = document.getElementById('history-list-container');
+  const totalBadge = document.getElementById('history-total-badge');
+
+  if (loadingSpinner) loadingSpinner.classList.remove('hidden');
+  if (errorState) errorState.classList.add('hidden');
+  if (emptyState) emptyState.classList.add('hidden');
+
+  try {
+    const res = await fetch(`/api/history?page=${historyCurrentPage}&limit=${historyPageLimit}`);
+    const json = await res.json();
+
+    if (json.success) {
+      cachedHistoryItems = json.data || [];
+      if (json.pagination) {
+        historyTotalRecords = json.pagination.total || 0;
+        historyTotalPages = Math.max(1, json.pagination.totalPages || 1);
+        historyCurrentPage = json.pagination.page || 1;
+      }
+
+      if (totalBadge) {
+        totalBadge.textContent = String(historyTotalRecords);
+      }
+
+      renderHistoryList(cachedHistoryItems, json.pagination || { page: historyCurrentPage, totalPages: historyTotalPages, total: historyTotalRecords });
+    } else {
+      if (errorState) errorState.classList.remove('hidden');
+      if (listContainer) listContainer.innerHTML = '';
+    }
+  } catch {
+    if (errorState) errorState.classList.remove('hidden');
+    if (listContainer) listContainer.innerHTML = '';
+  } finally {
+    if (loadingSpinner) loadingSpinner.classList.add('hidden');
+  }
+}
+
+/**
+ * Renders the history records into the sidebar history list container
+ */
+function renderHistoryList(items, pagination = {}) {
+  if (typeof document === 'undefined') return;
+
+  const listContainer = document.getElementById('history-list-container');
+  const emptyState = document.getElementById('history-empty-state');
+  const paginationContainer = document.getElementById('history-pagination-container');
+  const pageInfo = document.getElementById('history-page-info');
+  const btnPrev = document.getElementById('btn-history-prev');
+  const btnNext = document.getElementById('btn-history-next');
+
+  if (!listContainer) return;
+
+  listContainer.innerHTML = '';
+
+  if (!items || items.length === 0) {
+    if (emptyState) emptyState.classList.remove('hidden');
+    if (paginationContainer) paginationContainer.classList.add('hidden');
+    return;
+  }
+
+  if (emptyState) emptyState.classList.add('hidden');
+
+  // Render pagination controls
+  if (paginationContainer) {
+    paginationContainer.classList.remove('hidden');
+    const totalPages = Math.max(1, pagination.totalPages || 1);
+    const currentPage = pagination.page || 1;
+
+    if (pageInfo) pageInfo.textContent = `${currentPage} / ${totalPages}`;
+    if (btnPrev) btnPrev.disabled = currentPage <= 1;
+    if (btnNext) btnNext.disabled = currentPage >= totalPages;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'history-item-row';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'history-item-btn';
+    btn.setAttribute('data-id', item.id);
+    btn.title = `View details for ${item.request_name || item.url || 'request'}`;
+
+    const methodLower = (item.method || 'GET').toLowerCase();
+    const methodSpan = document.createElement('span');
+    methodSpan.className = `method-badge method-${methodLower}`;
+    methodSpan.textContent = item.method || 'GET';
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'history-item-meta';
+
+    const topDiv = document.createElement('div');
+    topDiv.className = 'history-item-top';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'history-item-name';
+    nameSpan.textContent = item.request_name || item.url || 'Untitled Request';
+
+    topDiv.appendChild(nameSpan);
+
+    const bottomDiv = document.createElement('div');
+    bottomDiv.className = 'history-item-bottom';
+
+    // Status pill
+    const statusSpan = document.createElement('span');
+    const status = item.response_status;
+    let statusClass = 'history-status-err';
+    if (status >= 200 && status < 300) statusClass = 'history-status-2xx';
+    else if (status >= 300 && status < 400) statusClass = 'history-status-3xx';
+    else if (status >= 400 && status < 500) statusClass = 'history-status-4xx';
+    else if (status >= 500) statusClass = 'history-status-5xx';
+
+    statusSpan.className = `history-status-pill ${statusClass}`;
+    statusSpan.textContent = status ? String(status) : (item.error_message ? 'ERR' : 'FAIL');
+    bottomDiv.appendChild(statusSpan);
+
+    // Duration badge
+    if (item.response_time !== null && item.response_time !== undefined) {
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'history-time-badge';
+      timeSpan.textContent = `${item.response_time}ms`;
+      bottomDiv.appendChild(timeSpan);
+    }
+
+    // Date badge
+    if (item.created_at) {
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'history-date-badge';
+      try {
+        const d = new Date(item.created_at);
+        dateSpan.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch {
+        dateSpan.textContent = '';
+      }
+      bottomDiv.appendChild(dateSpan);
+    }
+
+    metaDiv.appendChild(topDiv);
+    metaDiv.appendChild(bottomDiv);
+
+    btn.appendChild(methodSpan);
+    btn.appendChild(metaDiv);
+
+    btn.addEventListener('click', () => {
+      openHistoryDetailModal(item.id);
+    });
+
+    // Delete single item button
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'history-delete-item-btn';
+    deleteBtn.title = 'Delete this record';
+    deleteBtn.setAttribute('aria-label', 'Delete this record');
+    deleteBtn.innerHTML = '&times;';
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteHistoryItem(item.id);
+    });
+
+    row.appendChild(btn);
+    row.appendChild(deleteBtn);
+    listContainer.appendChild(row);
+  });
+}
+
+/**
+ * Opens the History Detail Modal for a specific history record
+ */
+async function openHistoryDetailModal(id) {
+  if (typeof document === 'undefined' || !id) return;
+
+  const modal = document.getElementById('modal-history-detail');
+  if (!modal) return;
+
+  try {
+    const res = await fetch(`/api/history/${id}`);
+    const json = await res.json();
+
+    if (!json.success || !json.data) {
+      showToast('Error', 'Failed to retrieve history record details.', 'warning');
+      return;
+    }
+
+    selectedHistoryRecord = json.data;
+    const rec = json.data;
+
+    // Populate header & meta
+    const methodBadge = document.getElementById('hist-detail-method-badge');
+    const nameEl = document.getElementById('hist-detail-name');
+    const urlEl = document.getElementById('hist-detail-url');
+    const statusPill = document.getElementById('hist-detail-status-pill');
+    const timeEl = document.getElementById('hist-detail-time');
+    const dateEl = document.getElementById('hist-detail-date');
+    const truncBadge = document.getElementById('hist-detail-truncated-badge');
+    const errorRow = document.getElementById('hist-detail-error-row');
+    const errorMsg = document.getElementById('hist-detail-error-msg');
+
+    if (methodBadge) {
+      const m = (rec.method || 'GET').toLowerCase();
+      methodBadge.className = `method-badge method-${m}`;
+      methodBadge.textContent = rec.method || 'GET';
+    }
+
+    if (nameEl) nameEl.textContent = rec.request_name || 'Untitled Request';
+    if (urlEl) urlEl.textContent = rec.url || '-';
+
+    if (statusPill) {
+      const s = rec.response_status;
+      let statusClass = 'status-pill-danger';
+      if (s >= 200 && s < 300) statusClass = 'status-pill-success';
+      else if (s >= 300 && s < 400) statusClass = 'status-pill-info';
+      else if (s >= 400 && s < 500) statusClass = 'status-pill-warning';
+
+      statusPill.className = `status-pill ${statusClass}`;
+      statusPill.textContent = s ? `${s}` : 'No Response';
+    }
+
+    if (timeEl) timeEl.textContent = rec.response_time !== null && rec.response_time !== undefined ? `${rec.response_time}ms` : '-';
+    if (dateEl) {
+      try {
+        dateEl.textContent = new Date(rec.created_at).toLocaleString();
+      } catch {
+        dateEl.textContent = rec.created_at || '-';
+      }
+    }
+
+    if (truncBadge) {
+      if (rec.response_body_truncated) {
+        truncBadge.classList.remove('hidden');
+      } else {
+        truncBadge.classList.add('hidden');
+      }
+    }
+
+    if (errorRow && errorMsg) {
+      if (rec.error_message) {
+        errorMsg.textContent = rec.error_message;
+        errorRow.classList.remove('hidden');
+      } else {
+        errorRow.classList.add('hidden');
+      }
+    }
+
+    // Populate Request details
+    const reqHeadersView = document.getElementById('hist-detail-req-headers');
+    const reqBodyView = document.getElementById('hist-detail-req-body');
+
+    if (reqHeadersView) {
+      if (rec.request_headers && typeof rec.request_headers === 'object' && Object.keys(rec.request_headers).length > 0) {
+        reqHeadersView.textContent = JSON.stringify(rec.request_headers, null, 2);
+      } else {
+        reqHeadersView.textContent = 'None';
+      }
+    }
+
+    if (reqBodyView) {
+      reqBodyView.textContent = rec.request_body || 'None';
+    }
+
+    // Populate Response details
+    const resHeadersView = document.getElementById('hist-detail-res-headers');
+    const resBodyView = document.getElementById('hist-detail-res-body');
+
+    if (resHeadersView) {
+      if (rec.response_headers && typeof rec.response_headers === 'object' && Object.keys(rec.response_headers).length > 0) {
+        resHeadersView.textContent = JSON.stringify(rec.response_headers, null, 2);
+      } else {
+        resHeadersView.textContent = 'None';
+      }
+    }
+
+    if (resBodyView) {
+      if (rec.response_body) {
+        try {
+          const parsed = JSON.parse(rec.response_body);
+          resBodyView.innerHTML = highlightJsonToHtml(JSON.stringify(parsed, null, 2));
+        } catch {
+          resBodyView.textContent = rec.response_body;
+        }
+      } else {
+        resBodyView.textContent = 'None';
+      }
+    }
+
+    // Reset tabs to Request tab
+    switchHistoryDetailTab('hist-view-request');
+
+    modal.classList.add('active');
+  } catch (err) {
+    showToast('Error', `Failed to open history details: ${err.message}`, 'warning');
+  }
+}
+
+/**
+ * Closes the History Detail Modal
+ */
+function closeHistoryDetailModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-history-detail');
+  if (modal) modal.classList.remove('active');
+  selectedHistoryRecord = null;
+}
+
+/**
+ * Switches between Request and Response tabs in History Detail Modal
+ */
+function switchHistoryDetailTab(targetViewId) {
+  if (typeof document === 'undefined') return;
+
+  const tabBtns = document.querySelectorAll('.history-tab-btn');
+  const tabContents = document.querySelectorAll('.history-tab-content');
+
+  tabBtns.forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-target') === targetViewId);
+  });
+
+  tabContents.forEach((content) => {
+    content.classList.toggle('hidden', content.id !== targetViewId);
+  });
+}
+
+/**
+ * Converts a history record into active request state and loads it into the workspace
+ */
+function loadHistoryIntoWorkspace(record = selectedHistoryRecord) {
+  if (!record) return;
+
+  // Build params
+  let parsedUrl = record.url || '';
+  const params = [];
+  try {
+    const u = new URL(parsedUrl);
+    u.searchParams.forEach((val, key) => {
+      params.push({
+        id: generateRowId('param'),
+        key,
+        value: val,
+        description: '',
+        enabled: true
+      });
+    });
+  } catch {
+    // If not a valid absolute URL, leave params empty
+  }
+
+  if (params.length === 0) {
+    params.push({ id: generateRowId('param'), key: '', value: '', description: '', enabled: false });
+  }
+
+  // Build headers
+  const headers = [];
+  if (record.request_headers && typeof record.request_headers === 'object') {
+    Object.entries(record.request_headers).forEach(([key, value]) => {
+      headers.push({
+        id: generateRowId('hdr'),
+        key,
+        value: String(value),
+        description: '',
+        enabled: true
+      });
+    });
+  }
+  if (headers.length === 0) {
+    headers.push({ id: generateRowId('hdr'), key: 'Accept', value: 'application/json', description: '', enabled: true });
+  }
+
+  // Build body
+  let bodyType = 'none';
+  let bodyText = '';
+  if (record.request_body) {
+    bodyText = record.request_body;
+    try {
+      JSON.parse(record.request_body);
+      bodyType = 'json';
+    } catch {
+      bodyType = 'raw';
+    }
+  }
+
+  loadRequestIntoState({
+    name: record.request_name || 'History Request',
+    method: record.method || 'GET',
+    url: record.url || '',
+    params,
+    headers,
+    body: { type: bodyType, text: bodyText },
+    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+  });
+
+  closeHistoryDetailModal();
+  showToast('Workspace Updated', `Loaded "${record.request_name || record.url}" into workspace.`, 'success');
+}
+
+/**
+ * Deletes a single history record by ID
+ */
+async function deleteHistoryItem(id) {
+  if (!id) return;
+
+  try {
+    const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast('Record Deleted', 'Execution history record deleted successfully.', 'info');
+
+      if (selectedHistoryRecord && selectedHistoryRecord.id === id) {
+        closeHistoryDetailModal();
+      }
+
+      // If this was the last item on current page and we're past page 1, step back
+      if (cachedHistoryItems.length <= 1 && historyCurrentPage > 1) {
+        historyCurrentPage--;
+      }
+
+      fetchHistoryList(historyCurrentPage);
+    } else {
+      showToast('Error', json.message || 'Failed to delete history record.', 'warning');
+    }
+  } catch (err) {
+    showToast('Error', `Network error deleting record: ${err.message}`, 'warning');
+  }
+}
+
+/**
+ * Opens the Clear All History confirmation modal
+ */
+function openClearHistoryModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-clear-history');
+  if (modal) modal.classList.add('active');
+}
+
+/**
+ * Closes the Clear All History confirmation modal
+ */
+function closeClearHistoryModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-clear-history');
+  if (modal) modal.classList.remove('active');
+}
+
+/**
+ * Executes clear-all history deletion
+ */
+async function confirmClearAllHistory() {
+  try {
+    const res = await fetch('/api/history', { method: 'DELETE' });
+    const json = await res.json();
+
+    if (json.success) {
+      showToast('History Cleared', 'All execution history records have been deleted.', 'success');
+      closeClearHistoryModal();
+      historyCurrentPage = 1;
+      fetchHistoryList(1);
+    } else {
+      showToast('Error', json.message || 'Failed to clear history.', 'warning');
+    }
+  } catch (err) {
+    showToast('Error', `Network error clearing history: ${err.message}`, 'warning');
+  }
+}
+
+let isHistoryInitialized = false;
+
+/**
+ * Initializes History Management event handlers and triggers initial fetch
+ */
+function initHistoryManagement() {
+  if (typeof document === 'undefined') return;
+  if (isHistoryInitialized) return;
+  isHistoryInitialized = true;
+
+  // Refresh & Clear All buttons in sidebar header
+  const btnRefresh = document.getElementById('btn-history-refresh');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => fetchHistoryList(historyCurrentPage));
+  }
+
+  const btnClearAll = document.getElementById('btn-history-clear-all');
+  if (btnClearAll) {
+    btnClearAll.addEventListener('click', openClearHistoryModal);
+  }
+
+  const btnRetry = document.getElementById('btn-history-retry');
+  if (btnRetry) {
+    btnRetry.addEventListener('click', () => fetchHistoryList(historyCurrentPage));
+  }
+
+  // Pagination buttons
+  const btnPrev = document.getElementById('btn-history-prev');
+  if (btnPrev) {
+    btnPrev.addEventListener('click', () => {
+      if (historyCurrentPage > 1) {
+        fetchHistoryList(historyCurrentPage - 1);
+      }
+    });
+  }
+
+  const btnNext = document.getElementById('btn-history-next');
+  if (btnNext) {
+    btnNext.addEventListener('click', () => {
+      if (historyCurrentPage < historyTotalPages) {
+        fetchHistoryList(historyCurrentPage + 1);
+      }
+    });
+  }
+
+  // History Detail Modal controls
+  const btnDetailClose = document.getElementById('btn-hist-detail-close');
+  if (btnDetailClose) btnDetailClose.addEventListener('click', closeHistoryDetailModal);
+
+  const btnDetailCancel = document.getElementById('btn-hist-detail-cancel');
+  if (btnDetailCancel) btnDetailCancel.addEventListener('click', closeHistoryDetailModal);
+
+  const btnDetailLoad = document.getElementById('btn-hist-detail-load');
+  if (btnDetailLoad) {
+    btnDetailLoad.addEventListener('click', () => loadHistoryIntoWorkspace(selectedHistoryRecord));
+  }
+
+  const btnDetailDelete = document.getElementById('btn-hist-detail-delete');
+  if (btnDetailDelete) {
+    btnDetailDelete.addEventListener('click', () => {
+      if (selectedHistoryRecord && selectedHistoryRecord.id) {
+        deleteHistoryItem(selectedHistoryRecord.id);
+      }
+    });
+  }
+
+  // History Detail Tabs
+  const tabReq = document.getElementById('tab-btn-hist-request');
+  if (tabReq) {
+    tabReq.addEventListener('click', () => switchHistoryDetailTab('hist-view-request'));
+  }
+
+  const tabRes = document.getElementById('tab-btn-hist-response');
+  if (tabRes) {
+    tabRes.addEventListener('click', () => switchHistoryDetailTab('hist-view-response'));
+  }
+
+  // Clear All Modal controls
+  const btnClearClose = document.getElementById('btn-clear-hist-close');
+  if (btnClearClose) btnClearClose.addEventListener('click', closeClearHistoryModal);
+
+  const btnClearCancel = document.getElementById('btn-clear-hist-cancel');
+  if (btnClearCancel) btnClearCancel.addEventListener('click', closeClearHistoryModal);
+
+  const btnClearConfirm = document.getElementById('btn-clear-hist-confirm');
+  if (btnClearConfirm) btnClearConfirm.addEventListener('click', confirmClearAllHistory);
+
+  // Initial fetch
+  fetchHistoryList(1);
+}
+
+/* ==========================================================================
    9. Testing and Module Compatibility Export
    ========================================================================== */
 
@@ -4187,7 +4784,21 @@ if (typeof window !== 'undefined') {
     deleteEnvironmentFromModal,
     addVariableRowToModal,
     getCachedEnvironments: () => cachedEnvironments,
-    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; }
+    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; },
+    fetchHistoryList,
+    renderHistoryList,
+    openHistoryDetailModal,
+    closeHistoryDetailModal,
+    loadHistoryIntoWorkspace,
+    deleteHistoryItem,
+    confirmClearAllHistory,
+    openClearHistoryModal,
+    closeClearHistoryModal,
+    getHistoryCurrentPage: () => historyCurrentPage,
+    getCachedHistoryItems: () => cachedHistoryItems,
+    getSelectedHistoryRecord: () => selectedHistoryRecord,
+    initSidebar,
+    initHistoryManagement
   };
 }
 
@@ -4244,7 +4855,21 @@ if (typeof module !== 'undefined' && module.exports) {
     deleteEnvironmentFromModal,
     addVariableRowToModal,
     getCachedEnvironments: () => cachedEnvironments,
-    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; }
+    setDynamicEnvironments: (envs) => { cachedEnvironments = envs; },
+    fetchHistoryList,
+    renderHistoryList,
+    openHistoryDetailModal,
+    closeHistoryDetailModal,
+    loadHistoryIntoWorkspace,
+    deleteHistoryItem,
+    confirmClearAllHistory,
+    openClearHistoryModal,
+    closeClearHistoryModal,
+    getHistoryCurrentPage: () => historyCurrentPage,
+    getCachedHistoryItems: () => cachedHistoryItems,
+    getSelectedHistoryRecord: () => selectedHistoryRecord,
+    initSidebar,
+    initHistoryManagement
   };
 }
 

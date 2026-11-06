@@ -194,28 +194,61 @@
             </div>
           </div>
 
-          <!-- History Section -->
-          <div class="sidebar-section">
+          <!-- History Section (Day 13: Request History & Execution Management) -->
+          <div class="sidebar-section" id="sidebar-history-section">
             <div class="sidebar-section-title">
-              <span>HISTORY (DEMO)</span>
-              <span class="history-pill">Frontend demo</span>
+              <div class="history-title-group">
+                <span>HISTORY</span>
+                <span id="history-total-badge" class="history-count-badge" title="Total recorded executions">0</span>
+              </div>
+              <div class="history-header-actions">
+                <button type="button" id="btn-history-refresh" class="history-icon-btn" title="Refresh history" aria-label="Refresh history">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+                <button type="button" id="btn-history-clear-all" class="history-icon-btn history-danger-btn" title="Clear all history" aria-label="Clear all history">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
-            <div class="history-list">
-              <button class="request-item" data-id="hist-1" data-method="GET" data-name="Get Users List" data-url="https://jsonplaceholder.typicode.com/users">
-                <span class="method-badge method-get">GET</span>
-                <span class="request-name">/users</span>
-                <span class="request-sub">200 OK</span>
-              </button>
-              <button class="request-item" data-id="hist-2" data-method="POST" data-name="Login Authenticate" data-url="https://jsonplaceholder.typicode.com/posts">
-                <span class="method-badge method-post">POST</span>
-                <span class="request-name">/posts</span>
-                <span class="request-sub">201 Created</span>
-              </button>
-              <button class="request-item" data-id="hist-3" data-method="GET" data-name="Check Server Health" data-url="http://localhost:3000/api/health">
-                <span class="method-badge method-get">GET</span>
-                <span class="request-name">/api/health</span>
-                <span class="request-sub">Local</span>
-              </button>
+
+            <!-- Loading State -->
+            <div id="history-loading-indicator" class="history-state-msg hidden">
+              <span class="history-spinner"></span>
+              <span>Loading history...</span>
+            </div>
+
+            <!-- Error State -->
+            <div id="history-error-state" class="history-state-msg history-error-msg hidden">
+              <span>Failed to load history</span>
+              <button type="button" id="btn-history-retry" class="history-retry-btn">Retry</button>
+            </div>
+
+            <!-- Empty State -->
+            <div id="history-empty-state" class="history-state-msg history-empty-msg hidden">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+              <span>No execution history yet</span>
+            </div>
+
+            <!-- Dynamic History List -->
+            <div class="history-list" id="history-list-container">
+              <!-- Rendered dynamically -->
+            </div>
+
+            <!-- History Pagination Controls -->
+            <div id="history-pagination-container" class="history-pagination hidden">
+              <button type="button" id="btn-history-prev" class="history-page-btn" title="Previous page" aria-label="Previous page" disabled>&lsaquo;</button>
+              <span id="history-page-info" class="history-page-info">1 / 1</span>
+              <button type="button" id="btn-history-next" class="history-page-btn" title="Next page" aria-label="Next page" disabled>&rsaquo;</button>
             </div>
           </div>
         </div>
@@ -227,7 +260,7 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          <span>Demo data only. Database persistence planned for Day 9.</span>
+          <span>Persistent execution history &amp; collections powered by MySQL.</span>
         </div>
       </aside>
 
@@ -962,6 +995,113 @@
         <div class="modal-footer">
           <button type="button" class="modal-btn modal-btn-cancel" id="btn-env-manager-cancel">Cancel</button>
           <button type="button" class="modal-btn modal-btn-primary" id="btn-env-manager-save">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Request History Detail (Day 13) -->
+    <div id="modal-history-detail" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-hist-title">
+      <div class="modal-dialog modal-dialog-lg history-detail-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-hist-title">
+            <span class="method-badge method-get" id="hist-detail-method-badge">GET</span>
+            <span id="hist-detail-name">Request Execution Details</span>
+          </div>
+          <button class="modal-close" id="btn-hist-detail-close" aria-label="Close dialog">&times;</button>
+        </div>
+        <div class="modal-body history-detail-body">
+          <!-- Meta Banner -->
+          <div class="history-meta-banner">
+            <div class="history-meta-item">
+              <span class="history-meta-label">URL:</span>
+              <span class="history-meta-value font-mono history-url-break" id="hist-detail-url">-</span>
+            </div>
+            <div class="history-meta-row">
+              <div class="history-meta-item">
+                <span class="history-meta-label">Status:</span>
+                <span id="hist-detail-status-pill" class="status-pill status-pill-success">200 OK</span>
+              </div>
+              <div class="history-meta-item">
+                <span class="history-meta-label">Time:</span>
+                <span id="hist-detail-time" class="history-meta-value">0ms</span>
+              </div>
+              <div class="history-meta-item">
+                <span class="history-meta-label">Executed:</span>
+                <span id="hist-detail-date" class="history-meta-value">-</span>
+              </div>
+              <span id="hist-detail-truncated-badge" class="history-trunc-badge hidden" title="Response payload exceeded 64 KB storage limit and was truncated">Truncated (64 KB)</span>
+            </div>
+            <div id="hist-detail-error-row" class="history-detail-error-box hidden">
+              <span class="history-error-label">Execution Error:</span>
+              <span id="hist-detail-error-msg" class="history-error-text"></span>
+            </div>
+          </div>
+
+          <!-- Tabs for Detail View: Request vs Response -->
+          <div class="history-detail-tabs">
+            <button type="button" class="history-tab-btn active" id="tab-btn-hist-request" data-target="hist-view-request">Request</button>
+            <button type="button" class="history-tab-btn" id="tab-btn-hist-response" data-target="hist-view-response">Response</button>
+          </div>
+
+          <!-- Request Section -->
+          <div id="hist-view-request" class="history-tab-content">
+            <div class="history-sub-group">
+              <span class="modal-label">Request Headers</span>
+              <div id="hist-detail-req-headers" class="history-code-view font-mono"></div>
+            </div>
+            <div class="history-sub-group">
+              <span class="modal-label">Request Body</span>
+              <div id="hist-detail-req-body" class="history-code-view font-mono"></div>
+            </div>
+          </div>
+
+          <!-- Response Section -->
+          <div id="hist-view-response" class="history-tab-content hidden">
+            <div class="history-sub-group">
+              <span class="modal-label">Response Headers</span>
+              <div id="hist-detail-res-headers" class="history-code-view font-mono"></div>
+            </div>
+            <div class="history-sub-group">
+              <span class="modal-label">Response Body</span>
+              <div id="hist-detail-res-body" class="history-code-view font-mono"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer history-detail-footer">
+          <button type="button" class="modal-btn modal-btn-danger-outline" id="btn-hist-detail-delete">Delete Record</button>
+          <div class="history-footer-right">
+            <button type="button" class="modal-btn modal-btn-cancel" id="btn-hist-detail-cancel">Close</button>
+            <button type="button" class="modal-btn modal-btn-primary" id="btn-hist-detail-load">Load into Workspace</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Clear All History Confirmation (Day 13) -->
+    <div id="modal-clear-history" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-clear-hist-title">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-clear-hist-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Clear Execution History</span>
+          </div>
+          <button class="modal-close" id="btn-clear-hist-close" aria-label="Close dialog">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0;">
+            Are you sure you want to permanently delete all request execution history records?
+          </p>
+          <p style="font-size: 11px; color: #ef4444; margin: 0;">
+            This action cannot be undone. Saved requests in collections will not be affected.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modal-btn modal-btn-cancel" id="btn-clear-hist-cancel">Cancel</button>
+          <button type="button" class="modal-btn modal-btn-danger" id="btn-clear-hist-confirm">Clear All History</button>
         </div>
       </div>
     </div>

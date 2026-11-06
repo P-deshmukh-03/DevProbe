@@ -48,6 +48,23 @@ const {
   REDACTED_PLACEHOLDER
 } = historyService;
 const { AppError } = require('./src/middleware/errorHandler');
+const {
+  fetchHistoryList,
+  renderHistoryList,
+  openHistoryDetailModal,
+  closeHistoryDetailModal,
+  loadHistoryIntoWorkspace,
+  deleteHistoryItem,
+  confirmClearAllHistory,
+  openClearHistoryModal,
+  closeClearHistoryModal,
+  getHistoryCurrentPage,
+  getCachedHistoryItems,
+  getSelectedHistoryRecord,
+  initSidebar,
+  initHistoryManagement,
+  activeRequest
+} = require('./public/js/app.js');
 
 let passedTests = 0;
 let totalTests = 0;
@@ -947,6 +964,93 @@ async function runTests() {
     } finally {
       historyService.getHistory = origGetHistory;
     }
+
+    // =========================================================================
+    // TEST L: Frontend History Interface & State Contracts (Step 5)
+    // =========================================================================
+    console.log('\n--- TEST L: Frontend History Interface & State Contracts (Step 5) ---');
+
+    assert(typeof fetchHistoryList === 'function', 'TEST L1: fetchHistoryList is exported');
+    assert(typeof renderHistoryList === 'function', 'TEST L1: renderHistoryList is exported');
+    assert(typeof openHistoryDetailModal === 'function', 'TEST L1: openHistoryDetailModal is exported');
+    assert(typeof closeHistoryDetailModal === 'function', 'TEST L1: closeHistoryDetailModal is exported');
+    assert(typeof loadHistoryIntoWorkspace === 'function', 'TEST L1: loadHistoryIntoWorkspace is exported');
+    assert(typeof deleteHistoryItem === 'function', 'TEST L1: deleteHistoryItem is exported');
+    assert(typeof confirmClearAllHistory === 'function', 'TEST L1: confirmClearAllHistory is exported');
+    assert(typeof openClearHistoryModal === 'function', 'TEST L1: openClearHistoryModal is exported');
+    assert(typeof closeClearHistoryModal === 'function', 'TEST L1: closeClearHistoryModal is exported');
+    assert(typeof initSidebar === 'function', 'TEST L1: initSidebar is exported');
+    assert(typeof initHistoryManagement === 'function', 'TEST L1: initHistoryManagement is exported');
+
+    // L2: State initializers and cache getters
+    assert(getHistoryCurrentPage() === 1, 'TEST L2: Initial historyCurrentPage is 1');
+    assert(Array.isArray(getCachedHistoryItems()), 'TEST L2: getCachedHistoryItems returns array');
+    assert(getSelectedHistoryRecord() === null, 'TEST L2: Initial selectedHistoryRecord is null');
+
+    // L3: Non-browser safety: executing modal and render helpers does not throw
+    let noThrowOnRender = true;
+    try {
+      renderHistoryList([]);
+      renderHistoryList(null);
+      openClearHistoryModal();
+      closeClearHistoryModal();
+      closeHistoryDetailModal();
+      initSidebar();
+      initHistoryManagement();
+    } catch {
+      noThrowOnRender = false;
+    }
+    assert(noThrowOnRender === true, 'TEST L3: History UI functions execute safely in non-browser context');
+
+    // L4: loadHistoryIntoWorkspace populates activeRequest state from history record
+    loadHistoryIntoWorkspace({
+      id: 9991,
+      request_name: 'Workspace History Injection Test',
+      method: 'POST',
+      url: 'https://api.devprobe.test/v1/orders?priority=high&tag=urgent',
+      request_headers: {
+        'Accept': 'application/json',
+        'X-Trace-Id': 'trace-abc-123',
+        'Content-Type': 'application/json'
+      },
+      request_body: '{"orderId": 42, "item": "Widget", "qty": 10}'
+    });
+
+    assert(activeRequest.name === 'Workspace History Injection Test', 'TEST L4: Workspace request name loaded');
+    assert(activeRequest.method === 'POST', 'TEST L4: Workspace HTTP method loaded');
+    assert(activeRequest.url === 'https://api.devprobe.test/v1/orders?priority=high&tag=urgent', 'TEST L4: Workspace URL loaded');
+    assert(activeRequest.body.type === 'json', 'TEST L4: JSON body type recognized and set');
+    assert(activeRequest.body.text === '{"orderId": 42, "item": "Widget", "qty": 10}', 'TEST L4: Request body text preserved');
+    assert(Array.isArray(activeRequest.headers), 'TEST L4: Headers converted to array');
+    assert(activeRequest.headers.some((h) => h.key === 'X-Trace-Id' && h.value === 'trace-abc-123'), 'TEST L4: Custom header preserved');
+    assert(Array.isArray(activeRequest.params), 'TEST L4: URL query params extracted into table rows');
+    assert(activeRequest.params.some((p) => p.key === 'priority' && p.value === 'high'), 'TEST L4: Query param priority parsed');
+    assert(activeRequest.params.some((p) => p.key === 'tag' && p.value === 'urgent'), 'TEST L4: Query param tag parsed');
+
+    // L5: loadHistoryIntoWorkspace handles raw/plain text body
+    loadHistoryIntoWorkspace({
+      id: 9992,
+      request_name: 'Plain Text History',
+      method: 'PUT',
+      url: 'https://api.devprobe.test/raw',
+      request_headers: {},
+      request_body: 'plain text content not json'
+    });
+    assert(activeRequest.name === 'Plain Text History', 'TEST L5: Plain text history name loaded');
+    assert(activeRequest.method === 'PUT', 'TEST L5: Method set to PUT');
+    assert(activeRequest.body.type === 'raw', 'TEST L5: Non-JSON body marked as raw type');
+    assert(activeRequest.body.text === 'plain text content not json', 'TEST L5: Raw body text loaded');
+
+    // L6: loadHistoryIntoWorkspace handles empty body
+    loadHistoryIntoWorkspace({
+      id: 9993,
+      request_name: 'Empty Body GET',
+      method: 'GET',
+      url: 'https://api.devprobe.test/empty',
+      request_headers: null,
+      request_body: null
+    });
+    assert(activeRequest.body.type === 'none', 'TEST L6: Null body marked as none');
 
   } finally {
     // Teardown: Clean up any servers and test records created
