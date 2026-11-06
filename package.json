@@ -17,6 +17,7 @@
     "test:day10": "node test-day10.js",
     "test:day11": "node test-day11.js",
     "test:day12": "node test-day12.js",
+    "test:day13": "node test-day13.js",
     "db:init": "node database/init.js"
   },
   "keywords": [],

@@ -218,6 +218,18 @@
               </div>
             </div>
 
+            <!-- Comparison Selection Toolbar (Day 13 Step 6) -->
+            <div id="history-compare-bar" class="history-compare-bar hidden">
+              <div class="compare-bar-info">
+                <span class="compare-bar-count" id="compare-selection-count">0/2</span>
+                <span class="compare-bar-label">selected</span>
+              </div>
+              <div class="compare-bar-actions">
+                <button type="button" id="btn-history-compare-launch" class="btn-compare-launch" disabled title="Compare the two selected executions">Compare</button>
+                <button type="button" id="btn-history-compare-clear" class="btn-compare-clear" title="Clear compare selection" aria-label="Clear compare selection">&times;</button>
+              </div>
+            </div>
+
             <!-- Loading State -->
             <div id="history-loading-indicator" class="history-state-msg hidden">
               <span class="history-spinner"></span>
@@ -1068,11 +1080,148 @@
           </div>
         </div>
         <div class="modal-footer history-detail-footer">
-          <button type="button" class="modal-btn modal-btn-danger-outline" id="btn-hist-detail-delete">Delete Record</button>
+          <div class="history-footer-left">
+            <button type="button" class="modal-btn modal-btn-danger-outline" id="btn-hist-detail-delete">Delete Record</button>
+            <button type="button" class="modal-btn modal-btn-secondary" id="btn-hist-detail-compare">Select for Compare</button>
+          </div>
           <div class="history-footer-right">
             <button type="button" class="modal-btn modal-btn-cancel" id="btn-hist-detail-cancel">Close</button>
             <button type="button" class="modal-btn modal-btn-primary" id="btn-hist-detail-load">Load into Workspace</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Request History Comparison (Day 13 Step 6) -->
+    <div id="modal-history-compare" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-compare-title">
+      <div class="modal-dialog modal-dialog-xl history-compare-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-compare-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M16 3h5v5"></path>
+              <path d="M4 20L21 3"></path>
+              <path d="M21 16v5h-5"></path>
+              <path d="M15 15l6 6"></path>
+              <path d="M4 4l5 5"></path>
+            </svg>
+            <span>Response Comparison</span>
+          </div>
+          <button class="modal-close" id="btn-compare-modal-close" aria-label="Close comparison dialog">&times;</button>
+        </div>
+
+        <div class="modal-body history-compare-body">
+          <!-- Loading state inside comparison modal -->
+          <div id="compare-modal-loading" class="compare-loading-state hidden">
+            <span class="history-spinner"></span>
+            <span>Fetching records for comparison...</span>
+          </div>
+
+          <!-- Error state inside comparison modal -->
+          <div id="compare-modal-error" class="compare-error-state hidden">
+            <span id="compare-modal-error-msg">Failed to load comparison data.</span>
+          </div>
+
+          <!-- Comparison content container -->
+          <div id="compare-modal-content" class="compare-content-container">
+            <!-- Global comparison delta banner -->
+            <div id="compare-delta-summary" class="compare-delta-summary">
+              <!-- Rendered dynamically -->
+            </div>
+
+            <!-- Side-by-side header cards -->
+            <div class="compare-grid-header">
+              <div class="compare-header-card compare-card-a">
+                <div class="compare-record-tag tag-a">Record A</div>
+                <div class="compare-record-title">
+                  <span id="compare-a-method" class="method-badge method-get">GET</span>
+                  <span id="compare-a-name" class="compare-name-text">Request A</span>
+                </div>
+                <div class="compare-meta-line font-mono" id="compare-a-url">-</div>
+                <div class="compare-metrics-row">
+                  <span id="compare-a-status" class="status-pill status-pill-success">200 OK</span>
+                  <span id="compare-a-time" class="history-meta-value">0ms</span>
+                  <span id="compare-a-date" class="history-meta-value">-</span>
+                  <span id="compare-a-trunc" class="history-trunc-badge hidden">Truncated (64 KB)</span>
+                </div>
+              </div>
+
+              <div class="compare-header-card compare-card-b">
+                <div class="compare-record-tag tag-b">Record B</div>
+                <div class="compare-record-title">
+                  <span id="compare-b-method" class="method-badge method-get">GET</span>
+                  <span id="compare-b-name" class="compare-name-text">Request B</span>
+                </div>
+                <div class="compare-meta-line font-mono" id="compare-b-url">-</div>
+                <div class="compare-metrics-row">
+                  <span id="compare-b-status" class="status-pill status-pill-success">200 OK</span>
+                  <span id="compare-b-time" class="history-meta-value">0ms</span>
+                  <span id="compare-b-date" class="history-meta-value">-</span>
+                  <span id="compare-b-trunc" class="history-trunc-badge hidden">Truncated (64 KB)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Comparison Subsections Tabs -->
+            <div class="compare-view-tabs">
+              <button type="button" class="compare-tab-btn active" id="tab-btn-compare-body" data-target="compare-section-body">Response Bodies</button>
+              <button type="button" class="compare-tab-btn" id="tab-btn-compare-headers" data-target="compare-section-headers">Response Headers</button>
+            </div>
+
+            <!-- Body Comparison Section -->
+            <div id="compare-section-body" class="compare-section-panel">
+              <div id="compare-body-identical-banner" class="compare-identical-banner hidden">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Response bodies are identical</span>
+              </div>
+              <div id="compare-truncation-warning" class="compare-truncation-banner hidden">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                <span>Warning: One or both response bodies were truncated at the 64 KB storage limit. Comparison may be incomplete and cannot guarantee full payload equivalence.</span>
+              </div>
+
+              <!-- Side-by-Side Diff Viewer -->
+              <div class="compare-body-grid">
+                <div class="compare-body-pane pane-a">
+                  <div class="compare-pane-header">
+                    <span>Record A Body</span>
+                    <span id="compare-a-body-type" class="compare-type-badge">JSON</span>
+                  </div>
+                  <div id="compare-a-body-view" class="compare-code-view font-mono"></div>
+                </div>
+
+                <div class="compare-body-pane pane-b">
+                  <div class="compare-pane-header">
+                    <span>Record B Body</span>
+                    <span id="compare-b-body-type" class="compare-type-badge">JSON</span>
+                  </div>
+                  <div id="compare-b-body-view" class="compare-code-view font-mono"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Headers Comparison Section -->
+            <div id="compare-section-headers" class="compare-section-panel hidden">
+              <div id="compare-headers-identical-banner" class="compare-identical-banner hidden">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Response headers are identical</span>
+              </div>
+              <table class="compare-headers-table">
+                <thead>
+                  <tr>
+                    <th>Header Name</th>
+                    <th>Record A Value</th>
+                    <th>Record B Value</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="compare-headers-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer history-compare-footer">
+          <button type="button" class="modal-btn modal-btn-cancel" id="btn-compare-modal-clear">Clear Selection & Close</button>
+          <button type="button" class="modal-btn modal-btn-secondary" id="btn-compare-modal-close-footer">Close</button>
         </div>
       </div>
     </div>

@@ -4161,6 +4161,8 @@ let historyTotalRecords = 0;
 let historyTotalPages = 1;
 let cachedHistoryItems = [];
 let selectedHistoryRecord = null;
+let selectedHistoryCompareIds = [];
+let cachedCompareRecords = { a: null, b: null };
 
 /**
  * Fetches paginated execution history from GET /api/history
@@ -4222,6 +4224,8 @@ function renderHistoryList(items, pagination = {}) {
   const btnPrev = document.getElementById('btn-history-prev');
   const btnNext = document.getElementById('btn-history-next');
 
+  updateHistoryCompareBar();
+
   if (!listContainer) return;
 
   listContainer.innerHTML = '';
@@ -4248,6 +4252,36 @@ function renderHistoryList(items, pagination = {}) {
   items.forEach((item) => {
     const row = document.createElement('div');
     row.className = 'history-item-row';
+
+    // Compare selection checkbox
+    const selectLabel = document.createElement('label');
+    selectLabel.className = 'history-select-label';
+    selectLabel.title = 'Select for comparison';
+    selectLabel.addEventListener('click', (e) => e.stopPropagation());
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'history-select-checkbox';
+    checkbox.setAttribute('aria-label', `Select ${item.request_name || item.url || 'request'} for comparison`);
+    const isSelected = selectedHistoryCompareIds.includes(item.id);
+    checkbox.checked = isSelected;
+
+    checkbox.addEventListener('change', (e) => {
+      e.stopPropagation();
+      toggleHistoryCompareSelection(item.id);
+    });
+    selectLabel.appendChild(checkbox);
+
+    if (isSelected) {
+      row.classList.add('is-selected-for-compare');
+      const tagIdx = selectedHistoryCompareIds.indexOf(item.id);
+      const tag = document.createElement('span');
+      tag.className = `compare-indicator-tag tag-${tagIdx === 0 ? 'a' : 'b'}`;
+      tag.textContent = tagIdx === 0 ? 'A' : 'B';
+      row.appendChild(tag);
+    }
+
+    row.appendChild(selectLabel);
 
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -4413,6 +4447,12 @@ async function openHistoryDetailModal(id) {
       } else {
         errorRow.classList.add('hidden');
       }
+    }
+
+    const btnCompareToggle = document.getElementById('btn-hist-detail-compare');
+    if (btnCompareToggle) {
+      const isSel = selectedHistoryCompareIds.includes(rec.id);
+      btnCompareToggle.textContent = isSel ? 'Remove from Compare' : 'Select for Compare';
     }
 
     // Populate Request details
@@ -4722,8 +4762,755 @@ function initHistoryManagement() {
   const btnClearConfirm = document.getElementById('btn-clear-hist-confirm');
   if (btnClearConfirm) btnClearConfirm.addEventListener('click', confirmClearAllHistory);
 
+  // Initialize comparison toolbar and modal controls
+  initHistoryComparison();
+
   // Initial fetch
   fetchHistoryList(1);
+}
+
+/* ==========================================================================
+   13. Response Comparison Management (Day 13 Step 6)
+   ========================================================================== */
+
+/**
+ * Returns a clone of the currently selected history IDs for comparison.
+ */
+function getSelectedHistoryCompareIds() {
+  return [...selectedHistoryCompareIds];
+}
+
+/**
+ * Sets the selected history compare IDs (capped at 2).
+ */
+function setSelectedHistoryCompareIds(ids) {
+  if (Array.isArray(ids)) {
+    selectedHistoryCompareIds = ids.slice(0, 2);
+    updateHistoryCompareBar();
+  }
+}
+
+/**
+ * Toggles selection of a history record for side-by-side comparison.
+ * Exactly two records can be selected.
+ */
+function toggleHistoryCompareSelection(id) {
+  if (!id) return;
+  const numId = Number(id);
+
+  const idx = selectedHistoryCompareIds.indexOf(numId);
+  if (idx !== -1) {
+    selectedHistoryCompareIds.splice(idx, 1);
+  } else {
+    if (selectedHistoryCompareIds.length >= 2) {
+      if (typeof showToast === 'function') {
+        showToast('Comparison Limit', 'You can select up to 2 records for comparison. Deselect one first.', 'warning');
+      }
+      return;
+    }
+    selectedHistoryCompareIds.push(numId);
+  }
+
+  updateHistoryCompareBar();
+
+  if (typeof document !== 'undefined') {
+    renderHistoryList(cachedHistoryItems);
+  }
+}
+
+/**
+ * Clears active history comparison selection.
+ */
+function clearHistoryCompareSelection() {
+  selectedHistoryCompareIds = [];
+  cachedCompareRecords = { a: null, b: null };
+  updateHistoryCompareBar();
+  if (typeof document !== 'undefined') {
+    renderHistoryList(cachedHistoryItems);
+  }
+}
+
+/**
+ * Updates the compare toolbar in the history sidebar.
+ */
+function updateHistoryCompareBar() {
+  if (typeof document === 'undefined') return;
+
+  const compareBar = document.getElementById('history-compare-bar');
+  const countBadge = document.getElementById('compare-selection-count');
+  const btnLaunch = document.getElementById('btn-history-compare-launch');
+
+  const count = selectedHistoryCompareIds.length;
+
+  if (countBadge) {
+    countBadge.textContent = `${count}/2`;
+  }
+
+  if (btnLaunch) {
+    btnLaunch.disabled = count !== 2;
+  }
+
+  if (compareBar) {
+    if (count > 0) {
+      compareBar.classList.remove('hidden');
+    } else {
+      compareBar.classList.add('hidden');
+    }
+  }
+}
+
+/**
+ * Compares two response header objects with case-insensitive key matching.
+ * @param {object|null} headersA - Headers from Record A
+ * @param {object|null} headersB - Headers from Record B
+ * @returns {{ identical: boolean, rows: Array<{ key: string, valueA: string|null, valueB: string|null, status: 'same'|'modified'|'only_a'|'only_b' }> }}
+ */
+function compareResponseHeaders(headersA, headersB) {
+  const normA = {};
+  const origKeyA = {};
+  if (headersA && typeof headersA === 'object') {
+    Object.entries(headersA).forEach(([k, v]) => {
+      const lower = k.toLowerCase();
+      normA[lower] = String(v);
+      origKeyA[lower] = k;
+    });
+  }
+
+  const normB = {};
+  const origKeyB = {};
+  if (headersB && typeof headersB === 'object') {
+    Object.entries(headersB).forEach(([k, v]) => {
+      const lower = k.toLowerCase();
+      normB[lower] = String(v);
+      origKeyB[lower] = k;
+    });
+  }
+
+  const allKeys = Array.from(new Set([...Object.keys(normA), ...Object.keys(normB)])).sort();
+  let identical = true;
+
+  const rows = allKeys.map((lowerKey) => {
+    const hasA = Object.prototype.hasOwnProperty.call(normA, lowerKey);
+    const hasB = Object.prototype.hasOwnProperty.call(normB, lowerKey);
+    const valA = hasA ? normA[lowerKey] : null;
+    const valB = hasB ? normB[lowerKey] : null;
+    const displayKey = origKeyA[lowerKey] || origKeyB[lowerKey] || lowerKey;
+
+    let status = 'same';
+    if (hasA && !hasB) {
+      status = 'only_a';
+      identical = false;
+    } else if (!hasA && hasB) {
+      status = 'only_b';
+      identical = false;
+    } else if (valA !== valB) {
+      status = 'modified';
+      identical = false;
+    }
+
+    return {
+      key: displayKey,
+      valueA: valA,
+      valueB: valB,
+      status
+    };
+  });
+
+  return { identical, rows };
+}
+
+/**
+ * Computes an LCS-based line-by-line diff between two multi-line strings.
+ * @param {string|null} textA
+ * @param {string|null} textB
+ * @returns {Array<{ type: 'same'|'added'|'removed', textA: string|null, textB: string|null }>}
+ */
+function computeLineDiff(textA, textB) {
+  if (textA === textB) {
+    const lines = (textA || '').split('\n');
+    return lines.map((l) => ({ type: 'same', textA: l, textB: l }));
+  }
+
+  const a = (textA === null || textA === undefined) ? [] : String(textA).split('\n');
+  const b = (textB === null || textB === undefined) ? [] : String(textB).split('\n');
+
+  if (a.length === 0) {
+    return b.map((l) => ({ type: 'added', textA: null, textB: l }));
+  }
+  if (b.length === 0) {
+    return a.map((l) => ({ type: 'removed', textA: l, textB: null }));
+  }
+
+  // Fast path / guard for very large line counts to keep UI responsive
+  if (a.length > 800 || b.length > 800) {
+    const diff = [];
+    const maxLen = Math.max(a.length, b.length);
+    for (let i = 0; i < maxLen; i++) {
+      const lineA = i < a.length ? a[i] : null;
+      const lineB = i < b.length ? b[i] : null;
+      if (lineA === lineB) {
+        diff.push({ type: 'same', textA: lineA, textB: lineB });
+      } else {
+        if (lineA !== null) diff.push({ type: 'removed', textA: lineA, textB: null });
+        if (lineB !== null) diff.push({ type: 'added', textA: null, textB: lineB });
+      }
+    }
+    return diff;
+  }
+
+  // Standard LCS Dynamic Programming
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) {
+      if (a[i] === b[j]) {
+        dp[i + 1][j + 1] = dp[i][j] + 1;
+      } else {
+        dp[i + 1][j + 1] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+
+  const result = [];
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      result.push({ type: 'same', textA: a[i - 1], textB: b[j - 1] });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.push({ type: 'added', textA: null, textB: b[j - 1] });
+      j--;
+    } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+      result.push({ type: 'removed', textA: a[i - 1], textB: null });
+      i--;
+    }
+  }
+
+  return result.reverse();
+}
+
+/**
+ * Formats a body payload for comparison (pretty JSON if valid JSON, otherwise string).
+ * @param {any} body
+ * @returns {{ text: string, type: 'json'|'text'|'empty' }}
+ */
+function formatBodyForComparison(body) {
+  if (body === null || body === undefined || body === '') {
+    return { text: '', type: 'empty' };
+  }
+
+  if (typeof body === 'object') {
+    try {
+      return { text: JSON.stringify(body, null, 2), type: 'json' };
+    } catch {
+      return { text: String(body), type: 'text' };
+    }
+  }
+
+  if (typeof body === 'string') {
+    const trimmed = body.trim();
+    if (trimmed.length === 0) {
+      return { text: '', type: 'empty' };
+    }
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return { text: JSON.stringify(parsed, null, 2), type: 'json' };
+      } catch {
+        return { text: body, type: 'text' };
+      }
+    }
+    return { text: body, type: 'text' };
+  }
+
+  return { text: String(body), type: 'text' };
+}
+
+/**
+ * Analyzes two history records and generates complete comparison metadata.
+ * @param {object} recA - History record A
+ * @param {object} recB - History record B
+ * @returns {object} Comparison descriptor
+ */
+function compareHistoryRecords(recA, recB) {
+  if (!recA || !recB) {
+    throw new Error('Both Record A and Record B are required for comparison');
+  }
+
+  // 1. Status comparison
+  const statusA = recA.response_status;
+  const statusB = recB.response_status;
+  const statusIdentical = statusA === statusB;
+
+  // 2. Latency comparison
+  const timeA = recA.response_time !== null && recA.response_time !== undefined ? Number(recA.response_time) : null;
+  const timeB = recB.response_time !== null && recB.response_time !== undefined ? Number(recB.response_time) : null;
+  const timeDelta = (timeA !== null && timeB !== null) ? (timeB - timeA) : null;
+
+  // 3. Truncation flags
+  const truncA = Boolean(recA.response_body_truncated);
+  const truncB = Boolean(recB.response_body_truncated);
+  const hasTruncation = truncA || truncB;
+
+  // 4. Failure comparison
+  const isFailedA = Boolean(recA.error_message || statusA === null);
+  const isFailedB = Boolean(recB.error_message || statusB === null);
+
+  // 5. Header comparison
+  const headerDiff = compareResponseHeaders(recA.response_headers, recB.response_headers);
+
+  // 6. Body comparison
+  const fmtA = formatBodyForComparison(recA.response_body);
+  const fmtB = formatBodyForComparison(recB.response_body);
+
+  let bodyIdentical = false;
+  let bodyDiffType = fmtA.type === fmtB.type ? fmtA.type : 'mixed';
+
+  if (isFailedA && isFailedB) {
+    bodyDiffType = 'error';
+    bodyIdentical = recA.error_message === recB.error_message;
+  } else if (isFailedA || isFailedB) {
+    bodyDiffType = 'error';
+    bodyIdentical = false;
+  } else if (!hasTruncation && fmtA.text === fmtB.text) {
+    bodyIdentical = true;
+  }
+
+  const lineDiff = (isFailedA || isFailedB)
+    ? computeLineDiff(recA.error_message || fmtA.text, recB.error_message || fmtB.text)
+    : computeLineDiff(fmtA.text, fmtB.text);
+
+  return {
+    recordA: recA,
+    recordB: recB,
+    statusDiff: {
+      statusA,
+      statusB,
+      identical: statusIdentical
+    },
+    timeDiff: {
+      timeA,
+      timeB,
+      delta: timeDelta
+    },
+    truncation: {
+      truncA,
+      truncB,
+      hasTruncation
+    },
+    failures: {
+      isFailedA,
+      isFailedB,
+      errorA: recA.error_message,
+      errorB: recB.error_message
+    },
+    headerDiff,
+    bodyDiff: {
+      typeA: fmtA.type,
+      typeB: fmtB.type,
+      diffType: bodyDiffType,
+      identical: bodyIdentical,
+      hasTruncation,
+      lines: lineDiff
+    }
+  };
+}
+
+/**
+ * Opens the History Compare Modal and loads comparison for the two selected IDs.
+ */
+async function openHistoryCompareModal() {
+  if (typeof document === 'undefined') return;
+
+  if (selectedHistoryCompareIds.length !== 2) {
+    if (typeof showToast === 'function') {
+      showToast('Select Records', 'Please select exactly two history records to compare.', 'warning');
+    }
+    return;
+  }
+
+  const modal = document.getElementById('modal-history-compare');
+  const loadingEl = document.getElementById('compare-modal-loading');
+  const errorEl = document.getElementById('compare-modal-error');
+  const errorMsg = document.getElementById('compare-modal-error-msg');
+  const contentEl = document.getElementById('compare-modal-content');
+
+  if (!modal) return;
+
+  modal.classList.add('active');
+  if (loadingEl) loadingEl.classList.remove('hidden');
+  if (errorEl) errorEl.classList.add('hidden');
+  if (contentEl) contentEl.classList.add('hidden');
+
+  const [idA, idB] = selectedHistoryCompareIds;
+
+  try {
+    const [resA, resB] = await Promise.all([
+      fetch(`/api/history/${idA}`),
+      fetch(`/api/history/${idB}`)
+    ]);
+
+    const jsonA = await resA.json();
+    const jsonB = await resB.json();
+
+    if (!resA.ok || !jsonA.success || !jsonA.data) {
+      throw new Error(`Could not load Record A (#${idA}): ${jsonA.error?.message || jsonA.message || 'Not found'}`);
+    }
+    if (!resB.ok || !jsonB.success || !jsonB.data) {
+      throw new Error(`Could not load Record B (#${idB}): ${jsonB.error?.message || jsonB.message || 'Not found'}`);
+    }
+
+    cachedCompareRecords = { a: jsonA.data, b: jsonB.data };
+    const comp = compareHistoryRecords(jsonA.data, jsonB.data);
+    renderCompareModalContent(comp);
+
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (contentEl) contentEl.classList.remove('hidden');
+  } catch (err) {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (errorEl && errorMsg) {
+      errorMsg.textContent = err.message || 'Failed to retrieve comparison records.';
+      errorEl.classList.remove('hidden');
+    }
+    if (typeof showToast === 'function') {
+      showToast('Compare Error', err.message || 'Failed to compare records.', 'warning');
+    }
+  }
+}
+
+/**
+ * Closes the History Compare Modal.
+ */
+function closeHistoryCompareModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-history-compare');
+  if (modal) modal.classList.remove('active');
+}
+
+/**
+ * Switches between Response Bodies and Response Headers in the Comparison Modal.
+ */
+function switchCompareSection(targetSectionId) {
+  if (typeof document === 'undefined') return;
+
+  const tabBtns = document.querySelectorAll('.compare-tab-btn');
+  const panels = document.querySelectorAll('.compare-section-panel');
+
+  tabBtns.forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-target') === targetSectionId);
+  });
+
+  panels.forEach((p) => {
+    p.classList.toggle('hidden', p.id !== targetSectionId);
+  });
+}
+
+/**
+ * Renders the comparison results into the comparison modal DOM elements.
+ * @param {object} comp - Comparison descriptor from compareHistoryRecords
+ */
+function renderCompareModalContent(comp) {
+  if (typeof document === 'undefined' || !comp) return;
+
+  const recA = comp.recordA;
+  const recB = comp.recordB;
+
+  // 1. Header Card A
+  const methA = document.getElementById('compare-a-method');
+  const nameA = document.getElementById('compare-a-name');
+  const urlA = document.getElementById('compare-a-url');
+  const statusA = document.getElementById('compare-a-status');
+  const timeA = document.getElementById('compare-a-time');
+  const dateA = document.getElementById('compare-a-date');
+  const truncA = document.getElementById('compare-a-trunc');
+
+  if (methA) {
+    const m = (recA.method || 'GET').toLowerCase();
+    methA.className = `method-badge method-${m}`;
+    methA.textContent = recA.method || 'GET';
+  }
+  if (nameA) nameA.textContent = recA.request_name || 'Untitled Request';
+  if (urlA) urlA.textContent = recA.url || '-';
+  if (statusA) {
+    const s = recA.response_status;
+    let sClass = 'status-pill-danger';
+    if (s >= 200 && s < 300) sClass = 'status-pill-success';
+    else if (s >= 300 && s < 400) sClass = 'status-pill-info';
+    else if (s >= 400 && s < 500) sClass = 'status-pill-warning';
+    statusA.className = `status-pill ${sClass}`;
+    statusA.textContent = s ? `${s} ${s === 200 ? 'OK' : ''}`.trim() : (recA.error_message ? 'Error' : 'No Response');
+  }
+  if (timeA) timeA.textContent = recA.response_time !== null && recA.response_time !== undefined ? `${recA.response_time}ms` : '-';
+  if (dateA) {
+    try { dateA.textContent = new Date(recA.created_at).toLocaleTimeString(); } catch { dateA.textContent = '-'; }
+  }
+  if (truncA) {
+    truncA.classList.toggle('hidden', !recA.response_body_truncated);
+  }
+
+  // 2. Header Card B
+  const methB = document.getElementById('compare-b-method');
+  const nameB = document.getElementById('compare-b-name');
+  const urlB = document.getElementById('compare-b-url');
+  const statusB = document.getElementById('compare-b-status');
+  const timeB = document.getElementById('compare-b-time');
+  const dateB = document.getElementById('compare-b-date');
+  const truncB = document.getElementById('compare-b-trunc');
+
+  if (methB) {
+    const m = (recB.method || 'GET').toLowerCase();
+    methB.className = `method-badge method-${m}`;
+    methB.textContent = recB.method || 'GET';
+  }
+  if (nameB) nameB.textContent = recB.request_name || 'Untitled Request';
+  if (urlB) urlB.textContent = recB.url || '-';
+  if (statusB) {
+    const s = recB.response_status;
+    let sClass = 'status-pill-danger';
+    if (s >= 200 && s < 300) sClass = 'status-pill-success';
+    else if (s >= 300 && s < 400) sClass = 'status-pill-info';
+    else if (s >= 400 && s < 500) sClass = 'status-pill-warning';
+    statusB.className = `status-pill ${sClass}`;
+    statusB.textContent = s ? `${s} ${s === 200 ? 'OK' : ''}`.trim() : (recB.error_message ? 'Error' : 'No Response');
+  }
+  if (timeB) timeB.textContent = recB.response_time !== null && recB.response_time !== undefined ? `${recB.response_time}ms` : '-';
+  if (dateB) {
+    try { dateB.textContent = new Date(recB.created_at).toLocaleTimeString(); } catch { dateB.textContent = '-'; }
+  }
+  if (truncB) {
+    truncB.classList.toggle('hidden', !recB.response_body_truncated);
+  }
+
+  // 3. Global Delta Summary Banner
+  const summaryEl = document.getElementById('compare-delta-summary');
+  if (summaryEl) {
+    summaryEl.innerHTML = '';
+
+    // Status delta pill
+    const pStatus = document.createElement('span');
+    if (comp.statusDiff.identical) {
+      pStatus.className = 'delta-pill delta-pill-same';
+      pStatus.textContent = `Status: ${comp.statusDiff.statusA || 'None'} (Identical)`;
+    } else {
+      pStatus.className = 'delta-pill delta-pill-diff';
+      pStatus.textContent = `Status: ${comp.statusDiff.statusA || 'None'} vs ${comp.statusDiff.statusB || 'None'}`;
+    }
+    summaryEl.appendChild(pStatus);
+
+    // Latency delta pill
+    if (comp.timeDiff.timeA !== null && comp.timeDiff.timeB !== null) {
+      const pTime = document.createElement('span');
+      const d = comp.timeDiff.delta;
+      const sign = d > 0 ? `+${d}ms` : `${d}ms`;
+      pTime.className = d === 0 ? 'delta-pill delta-pill-same' : 'delta-pill delta-pill-diff';
+      pTime.textContent = `Latency: ${comp.timeDiff.timeA}ms vs ${comp.timeDiff.timeB}ms (Δ ${sign})`;
+      summaryEl.appendChild(pTime);
+    }
+
+    // Headers delta pill
+    const pHeaders = document.createElement('span');
+    if (comp.headerDiff.identical) {
+      pHeaders.className = 'delta-pill delta-pill-same';
+      pHeaders.textContent = `Headers: All Identical (${comp.headerDiff.rows.length})`;
+    } else {
+      const diffCount = comp.headerDiff.rows.filter(r => r.status !== 'same').length;
+      pHeaders.className = 'delta-pill delta-pill-diff';
+      pHeaders.textContent = `Headers: ${diffCount} difference${diffCount === 1 ? '' : 's'}`;
+    }
+    summaryEl.appendChild(pHeaders);
+
+    // Body delta pill
+    const pBody = document.createElement('span');
+    if (comp.truncation.hasTruncation) {
+      pBody.className = 'delta-pill delta-pill-trunc';
+      pBody.textContent = 'Body: Truncated (64 KB limit)';
+    } else if (comp.bodyDiff.identical) {
+      pBody.className = 'delta-pill delta-pill-same';
+      pBody.textContent = 'Body: Identical';
+    } else {
+      pBody.className = 'delta-pill delta-pill-diff';
+      pBody.textContent = 'Body: Differences Found';
+    }
+    summaryEl.appendChild(pBody);
+  }
+
+  // 4. Response Bodies Panel
+  const bannerIdentical = document.getElementById('compare-body-identical-banner');
+  const bannerTrunc = document.getElementById('compare-truncation-warning');
+  const typeBadgeA = document.getElementById('compare-a-body-type');
+  const typeBadgeB = document.getElementById('compare-b-body-type');
+  const viewPaneA = document.getElementById('compare-a-body-view');
+  const viewPaneB = document.getElementById('compare-b-body-view');
+
+  if (bannerIdentical) {
+    bannerIdentical.classList.toggle('hidden', !comp.bodyDiff.identical);
+  }
+  if (bannerTrunc) {
+    bannerTrunc.classList.toggle('hidden', !comp.truncation.hasTruncation);
+  }
+  if (typeBadgeA) typeBadgeA.textContent = comp.bodyDiff.typeA.toUpperCase();
+  if (typeBadgeB) typeBadgeB.textContent = comp.bodyDiff.typeB.toUpperCase();
+
+  if (viewPaneA && viewPaneB) {
+    viewPaneA.innerHTML = '';
+    viewPaneB.innerHTML = '';
+
+    let lineCounterA = 1;
+    let lineCounterB = 1;
+
+    comp.bodyDiff.lines.forEach((line) => {
+      // Line for Pane A
+      const elA = document.createElement('div');
+      elA.className = `diff-line diff-${line.type === 'removed' ? 'removed' : (line.type === 'same' ? 'same' : 'empty')}`;
+
+      const numA = document.createElement('span');
+      numA.className = 'diff-line-num';
+      const textA = document.createElement('span');
+      textA.className = 'diff-line-text';
+
+      if (line.textA !== null) {
+        numA.textContent = String(lineCounterA++);
+        textA.textContent = line.textA;
+      } else {
+        numA.textContent = '';
+        textA.textContent = '';
+      }
+      elA.appendChild(numA);
+      elA.appendChild(textA);
+      viewPaneA.appendChild(elA);
+
+      // Line for Pane B
+      const elB = document.createElement('div');
+      elB.className = `diff-line diff-${line.type === 'added' ? 'added' : (line.type === 'same' ? 'same' : 'empty')}`;
+
+      const numB = document.createElement('span');
+      numB.className = 'diff-line-num';
+      const textB = document.createElement('span');
+      textB.className = 'diff-line-text';
+
+      if (line.textB !== null) {
+        numB.textContent = String(lineCounterB++);
+        textB.textContent = line.textB;
+      } else {
+        numB.textContent = '';
+        textB.textContent = '';
+      }
+      elB.appendChild(numB);
+      elB.appendChild(textB);
+      viewPaneB.appendChild(elB);
+    });
+  }
+
+  // 5. Response Headers Table
+  const bannerHeadersIdentical = document.getElementById('compare-headers-identical-banner');
+  const tbodyHeaders = document.getElementById('compare-headers-tbody');
+
+  if (bannerHeadersIdentical) {
+    bannerHeadersIdentical.classList.toggle('hidden', !comp.headerDiff.identical);
+  }
+
+  if (tbodyHeaders) {
+    tbodyHeaders.innerHTML = '';
+    comp.headerDiff.rows.forEach((row) => {
+      const tr = document.createElement('tr');
+
+      const tdKey = document.createElement('td');
+      tdKey.className = 'font-mono';
+      tdKey.textContent = row.key;
+
+      const tdValA = document.createElement('td');
+      tdValA.className = 'font-mono';
+      if (row.valueA !== null) {
+        tdValA.textContent = row.valueA;
+      } else {
+        tdValA.innerHTML = '<span class="diff-tag-missing">Not present</span>';
+      }
+
+      const tdValB = document.createElement('td');
+      tdValB.className = 'font-mono';
+      if (row.valueB !== null) {
+        tdValB.textContent = row.valueB;
+      } else {
+        tdValB.innerHTML = '<span class="diff-tag-missing">Not present</span>';
+      }
+
+      const tdStatus = document.createElement('td');
+      const pill = document.createElement('span');
+      pill.className = `diff-status-pill status-${row.status}`;
+      if (row.status === 'same') pill.textContent = 'Identical';
+      else if (row.status === 'modified') pill.textContent = 'Modified';
+      else if (row.status === 'only_a') pill.textContent = 'Record A only';
+      else if (row.status === 'only_b') pill.textContent = 'Record B only';
+      tdStatus.appendChild(pill);
+
+      tr.appendChild(tdKey);
+      tr.appendChild(tdValA);
+      tr.appendChild(tdValB);
+      tr.appendChild(tdStatus);
+      tbodyHeaders.appendChild(tr);
+    });
+  }
+}
+
+/**
+ * Binds comparison event listeners in the DOM.
+ */
+function initHistoryComparison() {
+  if (typeof document === 'undefined') return;
+
+  const btnLaunch = document.getElementById('btn-history-compare-launch');
+  if (btnLaunch) {
+    btnLaunch.addEventListener('click', openHistoryCompareModal);
+  }
+
+  const btnClear = document.getElementById('btn-history-compare-clear');
+  if (btnClear) {
+    btnClear.addEventListener('click', clearHistoryCompareSelection);
+  }
+
+  const btnModalClose = document.getElementById('btn-compare-modal-close');
+  if (btnModalClose) {
+    btnModalClose.addEventListener('click', closeHistoryCompareModal);
+  }
+
+  const btnModalCloseFooter = document.getElementById('btn-compare-modal-close-footer');
+  if (btnModalCloseFooter) {
+    btnModalCloseFooter.addEventListener('click', closeHistoryCompareModal);
+  }
+
+  const btnModalClear = document.getElementById('btn-compare-modal-clear');
+  if (btnModalClear) {
+    btnModalClear.addEventListener('click', () => {
+      clearHistoryCompareSelection();
+      closeHistoryCompareModal();
+    });
+  }
+
+  const tabBody = document.getElementById('tab-btn-compare-body');
+  if (tabBody) {
+    tabBody.addEventListener('click', () => switchCompareSection('compare-section-body'));
+  }
+
+  const tabHeaders = document.getElementById('tab-btn-compare-headers');
+  if (tabHeaders) {
+    tabHeaders.addEventListener('click', () => switchCompareSection('compare-section-headers'));
+  }
+
+  const btnDetailCompare = document.getElementById('btn-hist-detail-compare');
+  if (btnDetailCompare) {
+    btnDetailCompare.addEventListener('click', () => {
+      if (selectedHistoryRecord && selectedHistoryRecord.id) {
+        toggleHistoryCompareSelection(selectedHistoryRecord.id);
+        const isSel = selectedHistoryCompareIds.includes(selectedHistoryRecord.id);
+        btnDetailCompare.textContent = isSel ? 'Remove from Compare' : 'Select for Compare';
+      }
+    });
+  }
 }
 
 /* ==========================================================================
@@ -4798,7 +5585,21 @@ if (typeof window !== 'undefined') {
     getCachedHistoryItems: () => cachedHistoryItems,
     getSelectedHistoryRecord: () => selectedHistoryRecord,
     initSidebar,
-    initHistoryManagement
+    initHistoryManagement,
+    getSelectedHistoryCompareIds,
+    setSelectedHistoryCompareIds,
+    toggleHistoryCompareSelection,
+    clearHistoryCompareSelection,
+    updateHistoryCompareBar,
+    compareResponseHeaders,
+    computeLineDiff,
+    formatBodyForComparison,
+    compareHistoryRecords,
+    openHistoryCompareModal,
+    closeHistoryCompareModal,
+    switchCompareSection,
+    renderCompareModalContent,
+    initHistoryComparison
   };
 }
 
@@ -4869,7 +5670,21 @@ if (typeof module !== 'undefined' && module.exports) {
     getCachedHistoryItems: () => cachedHistoryItems,
     getSelectedHistoryRecord: () => selectedHistoryRecord,
     initSidebar,
-    initHistoryManagement
+    initHistoryManagement,
+    getSelectedHistoryCompareIds,
+    setSelectedHistoryCompareIds,
+    toggleHistoryCompareSelection,
+    clearHistoryCompareSelection,
+    updateHistoryCompareBar,
+    compareResponseHeaders,
+    computeLineDiff,
+    formatBodyForComparison,
+    compareHistoryRecords,
+    openHistoryCompareModal,
+    closeHistoryCompareModal,
+    switchCompareSection,
+    renderCompareModalContent,
+    initHistoryComparison
   };
 }
 

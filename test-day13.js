@@ -63,6 +63,20 @@ const {
   getSelectedHistoryRecord,
   initSidebar,
   initHistoryManagement,
+  getSelectedHistoryCompareIds,
+  setSelectedHistoryCompareIds,
+  toggleHistoryCompareSelection,
+  clearHistoryCompareSelection,
+  updateHistoryCompareBar,
+  compareResponseHeaders,
+  computeLineDiff,
+  formatBodyForComparison,
+  compareHistoryRecords,
+  openHistoryCompareModal,
+  closeHistoryCompareModal,
+  switchCompareSection,
+  renderCompareModalContent,
+  initHistoryComparison,
   activeRequest
 } = require('./public/js/app.js');
 
@@ -1051,6 +1065,248 @@ async function runTests() {
       request_body: null
     });
     assert(activeRequest.body.type === 'none', 'TEST L6: Null body marked as none');
+
+    // =========================================================================
+    // TEST M: Response Comparison Engine & Logic (Day 13 Step 6)
+    // =========================================================================
+    console.log('\n--- TEST M: Response Comparison Engine & Logic (Step 6) ---');
+
+    // M1: Identical response bodies
+    const recM1A = {
+      id: 801,
+      request_name: 'Identical GET A',
+      method: 'GET',
+      url: 'https://api.example.com/items',
+      response_status: 200,
+      response_time: 45,
+      response_body_truncated: 0,
+      response_headers: { 'content-type': 'application/json' },
+      response_body: { status: 'success', count: 2, items: ['apple', 'banana'] }
+    };
+    const recM1B = {
+      id: 802,
+      request_name: 'Identical GET B',
+      method: 'GET',
+      url: 'https://api.example.com/items',
+      response_status: 200,
+      response_time: 50,
+      response_body_truncated: 0,
+      response_headers: { 'content-type': 'application/json' },
+      response_body: { status: 'success', count: 2, items: ['apple', 'banana'] }
+    };
+    const compM1 = compareHistoryRecords(recM1A, recM1B);
+    assert(compM1.statusDiff.identical === true, 'TEST M1: Status codes identified as identical');
+    assert(compM1.bodyDiff.identical === true, 'TEST M1: Identical JSON response bodies identified');
+    assert(compM1.bodyDiff.lines.every(l => l.type === 'same'), 'TEST M1: All diff lines marked as same for identical bodies');
+
+    // M2: Different JSON objects
+    const recM2A = {
+      id: 803,
+      response_status: 200,
+      response_body: { name: 'Alice', age: 30, role: 'user' }
+    };
+    const recM2B = {
+      id: 804,
+      response_status: 200,
+      response_body: { name: 'Alice', age: 31, role: 'admin', active: true }
+    };
+    const compM2 = compareHistoryRecords(recM2A, recM2B);
+    assert(compM2.bodyDiff.identical === false, 'TEST M2: Different JSON objects marked as non-identical');
+    assert(compM2.bodyDiff.lines.some(l => l.type === 'added'), 'TEST M2: Detects added fields in JSON');
+    assert(compM2.bodyDiff.lines.some(l => l.type === 'removed'), 'TEST M2: Detects modified/removed fields in JSON');
+
+    // M3: Different JSON arrays
+    const recM3A = { id: 805, response_status: 200, response_body: [10, 20, 30] };
+    const recM3B = { id: 806, response_status: 200, response_body: [10, 25, 30, 40] };
+    const compM3 = compareHistoryRecords(recM3A, recM3B);
+    assert(compM3.bodyDiff.identical === false, 'TEST M3: Different JSON arrays marked as non-identical');
+    assert(compM3.bodyDiff.typeA === 'json' && compM3.bodyDiff.typeB === 'json', 'TEST M3: JSON arrays formatted as json type');
+
+    // M4: Plain-text differences
+    const recM4A = { id: 807, response_status: 200, response_body: 'Line 1\nAlpha\nLine 3' };
+    const recM4B = { id: 808, response_status: 200, response_body: 'Line 1\nBeta\nLine 3' };
+    const compM4 = compareHistoryRecords(recM4A, recM4B);
+    assert(compM4.bodyDiff.typeA === 'text' && compM4.bodyDiff.typeB === 'text', 'TEST M4: Plain text recognized as text type');
+    assert(compM4.bodyDiff.identical === false, 'TEST M4: Plain text differences detected');
+    assert(compM4.bodyDiff.lines.some(l => l.type === 'removed' && l.textA === 'Alpha'), 'TEST M4: Accurately identifies removed line');
+    assert(compM4.bodyDiff.lines.some(l => l.type === 'added' && l.textB === 'Beta'), 'TEST M4: Accurately identifies added line');
+
+    // M5: Empty body handling
+    const recM5A = { id: 809, response_status: 204, response_body: null };
+    const recM5B = { id: 810, response_status: 204, response_body: '' };
+    const compM5 = compareHistoryRecords(recM5A, recM5B);
+    assert(compM5.bodyDiff.identical === true, 'TEST M5: Two empty bodies treated as identical');
+    assert(compM5.bodyDiff.typeA === 'empty' && compM5.bodyDiff.typeB === 'empty', 'TEST M5: Empty bodies marked as empty type');
+
+    // M6: Added and removed response headers
+    const headersA = { 'Content-Type': 'application/json', 'X-Trace-Id': 'tr-123' };
+    const headersB = { 'Content-Type': 'application/json', 'ETag': '"abcdef"' };
+    const headerDiffM6 = compareResponseHeaders(headersA, headersB);
+    assert(headerDiffM6.identical === false, 'TEST M6: Different headers marked as non-identical');
+    const traceRow = headerDiffM6.rows.find(r => r.key.toLowerCase() === 'x-trace-id');
+    const etagRow = headerDiffM6.rows.find(r => r.key.toLowerCase() === 'etag');
+    assert(traceRow && traceRow.status === 'only_a', 'TEST M6: Removed header tagged as only_a');
+    assert(etagRow && etagRow.status === 'only_b', 'TEST M6: Added header tagged as only_b');
+
+    // M7: Case-insensitive header matching
+    const headersCaseA = { 'Content-Type': 'application/json', 'X-Auth-Scope': 'read' };
+    const headersCaseB = { 'content-type': 'application/json', 'x-auth-scope': 'write' };
+    const headerDiffM7 = compareResponseHeaders(headersCaseA, headersCaseB);
+    const ctRow = headerDiffM7.rows.find(r => r.key.toLowerCase() === 'content-type');
+    const authRow = headerDiffM7.rows.find(r => r.key.toLowerCase() === 'x-auth-scope');
+    assert(ctRow && ctRow.status === 'same', 'TEST M7: Header keys matched case-insensitively with same status');
+    assert(authRow && authRow.status === 'modified', 'TEST M7: Differing header values detected as modified');
+
+    // M8: Different status codes and latency delta
+    const recM8A = { id: 811, response_status: 200, response_time: 120 };
+    const recM8B = { id: 812, response_status: 500, response_time: 250 };
+    const compM8 = compareHistoryRecords(recM8A, recM8B);
+    assert(compM8.statusDiff.identical === false, 'TEST M8: Status difference detected (200 vs 500)');
+    assert(compM8.timeDiff.delta === 130, 'TEST M8: Calculates latency delta (+130ms)');
+
+    // M9: Failed request comparison
+    const recM9A = { id: 813, response_status: 200, response_body: '{"ok":true}' };
+    const recM9B = { id: 814, response_status: null, error_message: 'ECONNREFUSED 127.0.0.1:9099' };
+    const compM9 = compareHistoryRecords(recM9A, recM9B);
+    assert(compM9.failures.isFailedB === true, 'TEST M9: Identifies failure in Record B');
+    assert(compM9.bodyDiff.diffType === 'error', 'TEST M9: Diff type marked as error when request failed');
+    assert(compM9.bodyDiff.identical === false, 'TEST M9: Success vs failure marked as non-identical');
+
+    // M10: Truncated response warning & refusal to claim full equivalence
+    const truncatedPayload = 'A'.repeat(65536);
+    const recM10A = { id: 815, response_status: 200, response_body: truncatedPayload, response_body_truncated: 1 };
+    const recM10B = { id: 816, response_status: 200, response_body: truncatedPayload, response_body_truncated: 1 };
+    const compM10 = compareHistoryRecords(recM10A, recM10B);
+    assert(compM10.truncation.hasTruncation === true, 'TEST M10: Truncation flag detected on comparison');
+    assert(compM10.bodyDiff.identical === false, 'TEST M10: Strictly refuses to claim full equivalence for truncated payloads');
+
+    // M11: Large response handling
+    const largeLinesA = Array.from({ length: 1200 }, (_, i) => `Log entry ${i}`).join('\n');
+    const largeLinesB = Array.from({ length: 1200 }, (_, i) => i === 500 ? 'Modified log entry' : `Log entry ${i}`).join('\n');
+    const startLarge = Date.now();
+    const diffLarge = computeLineDiff(largeLinesA, largeLinesB);
+    const elapsedLarge = Date.now() - startLarge;
+    assert(Array.isArray(diffLarge) && diffLarge.length > 0, 'TEST M11: Large multi-line payload diffs successfully');
+    assert(elapsedLarge < 200, 'TEST M11: Large line diff completes rapidly without thread blocking');
+
+    // M12: Malformed JSON handling
+    const malformed = '{ invalid json "key": ';
+    const fmtMalformed = formatBodyForComparison(malformed);
+    assert(fmtMalformed.type === 'text', 'TEST M12: Malformed JSON falls back gracefully to text type');
+    assert(fmtMalformed.text === malformed, 'TEST M12: Preserves raw malformed text');
+
+    // =========================================================================
+    // TEST N: Comparison Workflow & Security Verification (Day 13 Step 7)
+    // =========================================================================
+    console.log('\n--- TEST N: Comparison Workflow & Security Verification (Step 7) ---');
+
+    // N1 & N2: Selection workflow
+    clearHistoryCompareSelection();
+    assert(getSelectedHistoryCompareIds().length === 0, 'TEST N1: Initially 0 records selected for compare');
+    toggleHistoryCompareSelection(1001);
+    assert(getSelectedHistoryCompareIds().length === 1 && getSelectedHistoryCompareIds()[0] === 1001, 'TEST N1: First record selected');
+    toggleHistoryCompareSelection(1002);
+    assert(getSelectedHistoryCompareIds().length === 2 && getSelectedHistoryCompareIds()[1] === 1002, 'TEST N2: Second record selected');
+
+    // N3: Duplicate selection & capping
+    toggleHistoryCompareSelection(1002); // Toggle off
+    assert(getSelectedHistoryCompareIds().length === 1 && getSelectedHistoryCompareIds()[0] === 1001, 'TEST N3: Toggling selected item unselects it');
+    toggleHistoryCompareSelection(1003); // Now 1001, 1003
+    toggleHistoryCompareSelection(1004); // Attempt 3rd
+    assert(getSelectedHistoryCompareIds().length === 2, 'TEST N3: Selection capped at exactly 2 records');
+    assert(!getSelectedHistoryCompareIds().includes(1004), 'TEST N3: 3rd record rejected');
+
+    // N4: Preventing comparison with fewer than two records
+    clearHistoryCompareSelection();
+    let threwOnMissing = false;
+    try {
+      compareHistoryRecords(null, null);
+    } catch {
+      threwOnMissing = true;
+    }
+    assert(threwOnMissing === true, 'TEST N4: compareHistoryRecords throws if fewer than two records provided');
+
+    // N5: Retrieve both history records via API & compare
+    const recDbA = await historyService.recordExecution(
+      { name: 'API Compare A', method: 'GET', url: 'https://api.devprobe.test/v1/users/1' },
+      { status: 200, headers: { 'content-type': 'application/json' }, body: { id: 1, name: 'Alice' }, duration: 40 }
+    );
+    const recDbB = await historyService.recordExecution(
+      { name: 'API Compare B', method: 'GET', url: 'https://api.devprobe.test/v1/users/1' },
+      { status: 200, headers: { 'content-type': 'application/json' }, body: { id: 1, name: 'Alice (Updated)' }, duration: 45 }
+    );
+    const resApiA = await makeRequest(appServer, { method: 'GET', path: `/api/history/${recDbA.id}` });
+    const resApiB = await makeRequest(appServer, { method: 'GET', path: `/api/history/${recDbB.id}` });
+    assert(resApiA.statusCode === 200 && resApiA.json?.success === true, 'TEST N5: Record A retrieved via API');
+    assert(resApiB.statusCode === 200 && resApiB.json?.success === true, 'TEST N5: Record B retrieved via API');
+    const compDb = compareHistoryRecords(resApiA.json.data, resApiB.json.data);
+    assert(compDb.statusDiff.identical === true, 'TEST N5: Retrieved records compared successfully');
+    assert(compDb.bodyDiff.identical === false, 'TEST N5: Body difference detected in retrieved records');
+
+    // N6: Handling missing record in comparison
+    const resMissing = await makeRequest(appServer, { method: 'GET', path: '/api/history/99999999' });
+    assert(resMissing.statusCode === 404, 'TEST N6: Missing history record returns 404');
+    assert(resMissing.json?.success === false, 'TEST N6: Missing record has success: false');
+
+    // N7: Clearing selection
+    clearHistoryCompareSelection();
+    assert(getSelectedHistoryCompareIds().length === 0, 'TEST N7: clearHistoryCompareSelection resets array to empty');
+
+    // N8: Non-browser safety for modal helpers
+    let noThrowModal = true;
+    try {
+      openHistoryCompareModal();
+      closeHistoryCompareModal();
+      switchCompareSection('compare-section-body');
+      updateHistoryCompareBar();
+      renderCompareModalContent(compM1);
+      initHistoryComparison();
+    } catch {
+      noThrowModal = false;
+    }
+    assert(noThrowModal === true, 'TEST N8: Comparison modal functions execute safely in non-browser context');
+
+    // N9 & N10: HTML and script injection resistance
+    const recXssA = {
+      id: 888,
+      response_status: 200,
+      response_headers: { 'X-XSS': '<script>alert("hdr")</script>' },
+      response_body: '<script>alert("body")</script><img src=x onerror=alert(1)>'
+    };
+    const recXssB = {
+      id: 889,
+      response_status: 200,
+      response_headers: { 'X-XSS': 'safe-value' },
+      response_body: 'normal text'
+    };
+    const compXss = compareHistoryRecords(recXssA, recXssB);
+    assert(compXss.bodyDiff.lines.some(l => l.textA && l.textA.includes('<script>')), 'TEST N9: XSS payload preserved as literal string');
+    assert(compXss.headerDiff.rows.some(r => r.valueA && r.valueA.includes('<script>')), 'TEST N10: Script-like header value preserved as literal text');
+
+    // N11: Security & Redaction Preservation in Comparison
+    const recSec = await historyService.recordExecution(
+      {
+        name: 'Secret Leak Check',
+        method: 'POST',
+        url: 'https://api.devprobe.test/login?api_key=supersecret123',
+        headers: { 'Authorization': 'Bearer confidential_token' },
+        body: { password: 'MySuperPassword!', token: 'auth-secret' }
+      },
+      {
+        status: 200,
+        headers: { 'Set-Cookie': 'session=abc12345; Secure' },
+        body: { token: 'new-auth-token-6789' },
+        duration: 25
+      }
+    );
+    const resSec = await makeRequest(appServer, { method: 'GET', path: `/api/history/${recSec.id}` });
+    const compSec = compareHistoryRecords(resSec.json.data, resSec.json.data);
+    const jsonStrSec = JSON.stringify(compSec);
+    assert(!jsonStrSec.includes('supersecret123'), 'TEST N11: Comparison data never leaks URL query secret');
+    assert(!jsonStrSec.includes('confidential_token'), 'TEST N11: Comparison data never leaks Authorization token');
+    assert(!jsonStrSec.includes('MySuperPassword!'), 'TEST N11: Comparison data never leaks request password');
+    assert(!jsonStrSec.includes('session=abc12345'), 'TEST N11: Comparison data never leaks Set-Cookie value');
+    assert(!jsonStrSec.includes('new-auth-token-6789'), 'TEST N11: Comparison data never leaks response token');
 
   } finally {
     // Teardown: Clean up any servers and test records created

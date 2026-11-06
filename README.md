@@ -19,7 +19,7 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 
 ## 📅 Current Development Status
 
-**Day 12 of 16 — Environment Management & Dynamic Variable Resolution**
+**Day 13 of 16 — Request Execution History, Audit Trail & Response Comparison**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
@@ -34,6 +34,7 @@ Completed Milestones:
 - **Day 10**: Collections and saved requests persistence in MySQL (`GET`/`POST /api/collections`, `GET`/`POST /api/requests/saved`), collection filtering, modal dialogs for collection and request creation, strict credential protection (bearer tokens and passwords stripped before persistence), and safe non-dispatch request loading.
 - **Day 11**: Full collection and saved request management: updating collections (`PUT /api/collections/:id`), safe collection deletion (`DELETE /api/collections/:id`) with automatic foreign key disassociation (`ON DELETE SET NULL`), saved request modification (`PUT /api/requests/saved/:id`), saved request deletion (`DELETE /api/requests/saved/:id`), interactive dark-theme workspace modals, and frontend non-dispatch verification.
 - **Day 12**: Complete Postman-style environment management: relational MySQL schema (`environments`, `environment_variables`) with `ON DELETE CASCADE`, AES-256-GCM secret encryption at rest via dedicated `DEVPROBE_ENCRYPTION_KEY`, API response secret masking (`••••••••`), secret preservation on update, atomic environment activation/deactivation, dynamic variable resolution across URLs, query params, headers, body, and auth on cloned execution payloads, SSRF integration blocking resolved loopback/metadata targets, dark-theme Environment Manager modal, and Quick View popover.
+- **Day 13**: Request execution history persistence and response comparison engine: relational MySQL schema (`request_history`), non-blocking fire-and-forget execution recording for both successful and failed outbound requests, multi-tier sanitization and redaction (Basic auth, query secrets, Authorization, Cookie, Set-Cookie, passwords, tokens), hard 64 KB response body storage cap with truncation flag, RESTful History API (`GET`/`DELETE /api/history`, `GET`/`DELETE /api/history/:id`), dynamic History sidebar with pagination, History Detail inspection modal, workspace loading, single and clear-all deletion, and side-by-side Response Comparison with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards.
 
 ## ✨ Features
 
@@ -44,6 +45,8 @@ Completed Milestones:
 - [x] **Live Response Inspector** — Inspect upstream status, latency (ms), payload size, headers table, raw/pretty JSON body, and cookie security policies.
 - [x] **Request Collections & Saved Requests** — Save, organize, edit, and delete requests into persistent collections (Day 10 & Day 11).
 - [x] **Environment Management & Dynamic Variables** — Postman-style environments with AES-256-GCM encrypted secrets, Quick Look popover, and variable resolution across URLs, headers, body, and auth (Day 12).
+- [x] **Request Execution History & Audit Trail** — Non-blocking recording of successful and failed outbound API executions in relational MySQL (`request_history`), pagination, 64 KB storage caps, and multi-tier credential sanitization (Day 13).
+- [x] **Side-by-Side Response Comparison** — Developer comparison engine comparing two saved history executions side-by-side with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards (Day 13).
 - [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
 - [ ] **Automated API Testing** — Assert status codes, response times, and JSON schema.
 - [ ] **API Documentation Generator** — Generate shareable documentation from saved requests.
@@ -73,7 +76,8 @@ DevProbe/
 │   ├── controllers/
 │   │   ├── collectionController.js # Collection CRUD and management controller
 │   │   ├── environmentController.js # Environment and variables CRUD controller
-│   │   ├── requestController.js    # Request controller (validate & execute endpoints)
+│   │   ├── historyController.js    # Request execution history controller (list, detail, delete, clear)
+│   │   ├── requestController.js    # Request controller (validate, execute, & auto-history recording)
 │   │   └── savedRequestController.js # Saved request CRUD and management controller
 │   ├── middleware/
 │   │   ├── errorHandler.js         # Centralized error handler and 404 handler
@@ -81,11 +85,13 @@ DevProbe/
 │   ├── routes/
 │   │   ├── collectionRoutes.js     # Collection routes (GET, POST, PUT, DELETE)
 │   │   ├── environmentRoutes.js    # Environment routes (GET, POST, PUT, DELETE, activate, variables)
+│   │   ├── historyRoutes.js        # History API routes (GET, DELETE)
 │   │   ├── requestRoutes.js        # Request configuration route definitions
 │   │   └── savedRequestRoutes.js   # Saved request routes (GET, POST, PUT, DELETE)
 │   └── services/
 │       ├── collectionService.js    # Collection persistence & safe deletion service
 │       ├── environmentService.js   # Environment & variable CRUD, AES-256-GCM encryption, & masking service
+│       ├── historyService.js       # Execution recording, multi-tier redaction, 64 KB truncation, & pagination service
 │       ├── requestService.js       # Real execution engine, DNS pinning, & normalization service
 │       └── savedRequestService.js  # Saved requests persistence, credential scrubbing, & update service
 │
@@ -99,6 +105,7 @@ DevProbe/
 ├── test-day10.js                   # Day 10 automated persistence test suite (88 tests)
 ├── test-day11.js                   # Day 11 automated management test suite (83 tests)
 ├── test-day12.js                   # Day 12 automated environment management test suite (101 tests)
+├── test-day13.js                   # Day 13 automated history & comparison test suite (274 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -124,6 +131,9 @@ DevProbe adheres to a structured, layered architecture:
 - **`src/controllers/savedRequestController.js`**: Handles saved request HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
 - **`src/services/environmentService.js`**: Manages environment and variable business logic: CRUD, unique key enforcement, atomic activation/deactivation, AES-256-GCM encryption at rest for sensitive secrets, safe masking (`••••••••`), and secret preservation during updates.
 - **`src/controllers/environmentController.js`**: Handles environment HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`, `/activate`, `/deactivate`, and nested variable routes).
+- **`src/services/historyService.js`**: Implements non-blocking execution persistence into MySQL (`request_history`), multi-tier credential redaction (embedded URL basic auth, query secrets, Authorization, Cookie, Set-Cookie, JSON secrets), hard 64 KB response body truncation with truncation flag, and paginated query engine.
+- **`src/controllers/historyController.js`**: Handles execution history HTTP endpoints (`GET /api/history`, `GET /api/history/:id`, `DELETE /api/history/:id`, `DELETE /api/history`).
+- **`src/routes/historyRoutes.js`**: Defines RESTful routes for history listing, detail inspection, single deletion, and clear-all operations with input validation.
 
 ## 🔒 Security Architecture & SSRF Defenses
 
@@ -437,7 +447,86 @@ In HTTP/1.1 (RFC 7231), payloads on GET and DELETE requests have undefined seman
   - `PUT /api/environments/:id/variables/:varId`: Update variable key, value, secret flag, or enabled flag.
   - `DELETE /api/environments/:id/variables/:varId`: Delete single variable.
 
-### 8. Execution Error Response Format
+### 8. Request Execution History API (Day 13)
+DevProbe automatically records outbound HTTP executions into relational MySQL (`request_history`) to provide a complete audit trail without blocking developer productivity.
+
+- **Non-Blocking Persistence**: History recording uses fire-and-forget execution (`recordHistorySafely`) so that database logging failures never alter or delay the original HTTP response.
+- **Multi-Tier Credential Redaction**:
+  - Embedded basic authentication in URLs (`https://user:pass@host`) is stripped.
+  - Query parameter secrets (`api_key`, `token`, `secret`, `access_token`, etc.) are masked as `[REDACTED]`.
+  - Sensitive request/response headers (`Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`) are redacted.
+  - Sensitive body keys (`password`, `token`, `secret`, `client_secret`) are recursively redacted in JSON payloads.
+- **64 KB Storage Cap & Truncation Safeguard**: Response bodies exceeding 64 KB are automatically truncated and stored with `response_body_truncated = 1` to prevent database bloat.
+- **List Execution History**: `GET /api/history?page=1&limit=20`
+  - **Status**: `200 OK`
+  - **Parameters**: `page` (default: 1), `limit` (default: 20, max: 100).
+  - **Payload Structure**:
+    ```json
+    {
+      "success": true,
+      "data": {
+        "items": [
+          {
+            "id": 142,
+            "request_name": "Get User Profile",
+            "method": "GET",
+            "url": "https://api.example.com/users/1",
+            "response_status": 200,
+            "response_time": 45,
+            "response_body_truncated": false,
+            "error_message": null,
+            "created_at": "2026-11-06T12:00:00.000Z"
+          }
+        ],
+        "pagination": {
+          "page": 1,
+          "limit": 20,
+          "total": 1,
+          "totalPages": 1
+        }
+      }
+    }
+    ```
+- **Retrieve Full History Record**: `GET /api/history/:id`
+  - **Status**: `200 OK` or `404 Not Found`
+  - **Payload**: Full execution record including redacted `request_headers`, `request_body`, `response_headers`, and `response_body`.
+- **Delete Single History Record**: `DELETE /api/history/:id`
+  - **Status**: `200 OK` or `404 Not Found`
+  - **Response**: `{ "success": true, "message": "History record deleted successfully.", "data": { "id": 142, "deleted": true } }`
+- **Clear All Execution History**: `DELETE /api/history`
+  - **Status**: `200 OK`
+  - **Response**: `{ "success": true, "message": "All execution history records cleared successfully.", "data": { "deletedCount": 42 } }`
+
+### 9. Side-by-Side Response Comparison (Day 13)
+DevProbe allows developers to inspect regressions and evaluate API variations by comparing the full responses of any two historical executions.
+
+- **Record Selection Workflow**:
+  - In the **Request History** sidebar, each record displays a selection checkbox.
+  - Alternatively, click **"Select for Compare"** inside the **History Details** modal.
+  - The sticky **Comparison Toolbar** (`#history-compare-bar`) tracks active selections (`1/2` or `2/2 selected`).
+  - Exactly two records can be selected. Attempting to select a 3rd record is prevented.
+  - Selected records are labeled with visual indicator tags (`A` and `B`).
+  - Clicking **"Compare"** launches the side-by-side comparison modal.
+- **Comparison Engine**:
+  - **Request Context**: Displays request names, HTTP methods, target URLs, and execution timestamps side-by-side.
+  - **Delta Summary Banner**: Summarizes high-level differences at a glance:
+    - Status code equivalence (e.g. `Status: 200 (Identical)` or `Status: 200 vs 500`).
+    - Roundtrip duration delta (e.g. `Latency: 45ms vs 50ms (Δ +5ms)`).
+    - Header difference count.
+    - Body equivalence flag (`Identical`, `Differences Found`, or `Truncated (64 KB limit)`).
+  - **Case-Insensitive Header Matching**:
+    - Aligns response headers by lowercased key names.
+    - Categorizes each header as `Identical`, `Modified`, `Record A only`, or `Record B only`.
+  - **LCS Line-by-Line Body Diff**:
+    - Formats JSON payloads with consistent 2-space indentation.
+    - Computes Longest Common Subsequence (LCS) line diffs with colored syntax highlights (`diff-same`, `diff-added`, `diff-removed`).
+    - Identifies fully identical payloads and displays an equivalence banner.
+  - **Truncation Safeguards**:
+    - If either response was truncated at the 64 KB storage boundary, a prominent warning informs the user that comparison is incomplete and refuses to claim full equivalence.
+  - **Failure Comparison**:
+    - Failed outbound executions (network refusal, timeouts, SSRF blocks) display error diagnostics instead of empty bodies.
+
+### 10. Execution Error Response Format
 When destination validation fails or limits are exceeded, a structured error is returned:
 ```json
 {
@@ -562,11 +651,14 @@ curl http://localhost:3000/api/health/db
 
 ## 🧪 Automated Testing
 
-DevProbe features a multi-tiered automated test suite with **754 passing tests** across 10 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, collection/request management, and environment variable resolution:
+DevProbe features a multi-tiered automated test suite with **1,028 passing tests** across 11 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, collection/request management, environment variable resolution, request execution history, and side-by-side response comparison:
 
 ```bash
-# Run all test suites (Day 3 through Day 12 — 754 total tests)
+# Run full regression suite (Day 3 through Day 12 — 754 total tests)
 npm test
+
+# Run Day 13 verification suite (History & Comparison — 274 total tests)
+npm run test:day13
 
 # Run individual test suites
 npm run test:day3    # Day 3: Frontend state & parameter parsing (34 tests)
@@ -579,6 +671,7 @@ npm run test:day9    # Day 9: MySQL database integration (61 tests)
 npm run test:day10   # Day 10: Collections & saved requests persistence (88 tests)
 npm run test:day11   # Day 11: Saved request & collection management (83 tests)
 npm run test:day12   # Day 12: Environment management & dynamic variable resolution (101 tests)
+npm run test:day13   # Day 13: Request execution history & response comparison (274 tests)
 ```
 
 ### Day 10 Test Coverage (88 Tests)
@@ -614,6 +707,42 @@ npm run test:day12   # Day 12: Environment management & dynamic variable resolut
 - **TEST H**: SQL injection resistance across all environment endpoints.
 - **TEST I**: Backward compatibility contracts with Day 3 verification test suite (`getEnvironmentVariable`, `resolveVariables`).
 
+### Day 13 Test Coverage (274 Tests)
+- **TEST A**: Multi-tier sanitization and redaction helpers (embedded URL credentials, sensitive query parameters `token`/`apiKey`, request/response headers `Authorization`/`Cookie`/`Set-Cookie`/`X-Api-Key`, recursive JSON keys `password`/`token`/`client_secret`, and AES-256-GCM token redaction).
+- **TEST B**: Successful request recording in MySQL (`request_history`), preserving method, sanitized URL, headers, 200 status, response time, and un-truncated payload state.
+- **TEST C**: Failed request recording capturing POST method, error descriptions, and null response headers/status for network failures and timeouts.
+- **TEST D**: Hard 64 KB payload boundary enforcement, verifying truncation flag (`response_body_truncated: true`) and storage caps.
+- **TEST E**: History list pagination (`page`, `limit`), sorting by `created_at DESC`, `totalPages` calculation, and query clamping (max limit: 100).
+- **TEST F**: ID validation and missing record 404 handling.
+- **TEST G**: Individual history record deletion (`DELETE /api/history/:id`).
+- **TEST H**: Clear-all history execution (`DELETE /api/history`), table verification, and deleted record count reporting.
+- **TEST I**: Database error sanitization preventing connection password exposure.
+- **TEST J**: Automatic controller execution recording, non-blocking fire-and-forget execution timing (<500ms even with hanging DB promises), and single record guarantees.
+- **TEST K**: REST API endpoint contracts (`GET /api/history`, `GET /api/history/:id`, `DELETE /api/history/:id`, `DELETE /api/history`).
+- **TEST L**: Frontend history interface contracts, module exports, non-browser safety, and workspace state injection (`loadHistoryIntoWorkspace`) across JSON, plain-text, and empty payloads.
+- **TEST M**: Side-by-side Response Comparison engine:
+  - Identical response bodies detection.
+  - Different JSON objects (added and removed field detection).
+  - Different JSON arrays.
+  - Plain-text diffing with line-by-line classification.
+  - Empty body equivalence.
+  - Response header diffing (added, removed, modified).
+  - Case-insensitive response header matching.
+  - Status code equivalence and roundtrip duration delta calculation.
+  - Failed request comparison (error diagnostics vs successful responses).
+  - Truncated payload safeguard (strictly refuses full equivalence on truncated bodies).
+  - Large multi-line payload diffing performance (<200ms without thread blocking).
+  - Malformed JSON fallback to raw text.
+- **TEST N**: Comparison workflow and security verification:
+  - Selecting records, selection capping at exactly 2 records, duplicate prevention, and toggling.
+  - Input validation requiring two valid records.
+  - Live retrieval via `GET /api/history/:id` and delta computation.
+  - Missing record 404 handling.
+  - Selection clearing.
+  - Non-browser safety for comparison modal helpers.
+  - HTML and script injection resistance (XSS payloads and script tags rendered safely as literal text).
+  - Credential protection: comparison payloads never leak URL secrets, Authorization headers, passwords, or Set-Cookie session tokens.
+
 ### Database Troubleshooting
 
 | Error Code | Meaning | Solution |
@@ -635,7 +764,8 @@ npm run test:day12   # Day 12: Environment management & dynamic variable resolut
 | Day 10 | Collections and saved requests persistence with secret credential protection | Completed |
 | Day 11 | Saved request & collection management (edit, delete, disassociation, modals) | Completed |
 | Day 12 | Environment management & dynamic variable resolution (AES-256-GCM, modals) | Completed |
-| Days 13–16 | Test runner, documentation generator, import/export, and final deployment | Planned |
+| Day 13 | Request execution history, audit trail & side-by-side response comparison | Completed |
+| Days 14–16 | User authentication, private workspaces, automated testing, documentation generator, & final deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -644,4 +774,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 12 complete. Environment management and dynamic variable resolution fully implemented with relational MySQL storage (`environments`, `environment_variables`), AES-256-GCM secret encryption at rest, API secret masking, secret preservation during editing, atomic activation, variable resolution across URLs, headers, body, and auth on cloned execution payloads, SSRF defense integration, Quick Look popover, dark-theme Environment Manager modal, and 754 automated tests passing with zero regressions.
+**In Active Development** — Day 13 complete. Request execution history persistence, audit trail, and side-by-side response comparison engine fully implemented with relational MySQL storage (`request_history`), non-blocking fire-and-forget execution recording, multi-tier sensitive credential sanitization and redaction, 64 KB response-body storage cap with truncation flag, RESTful History API (`GET`/`DELETE /api/history`, `GET`/`DELETE /api/history/:id`), dynamic History sidebar with pagination, History Detail inspection modal, workspace loading, single and clear-all deletion, and side-by-side Response Comparison with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards. All 1,028 automated tests (754 regression + 274 Day 13) passing with zero regressions.
