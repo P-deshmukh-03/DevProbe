@@ -9,6 +9,7 @@
 const { executeQuery, sanitizeDatabaseError } = require('../config/database');
 const { SENSITIVE_HEADERS, SENSITIVE_RESPONSE_HEADERS } = require('../config/security');
 const { AppError } = require('../middleware/errorHandler');
+const assertionService = require('./assertionService');
 
 /**
  * Maximum response body size stored in request_history (64 KB)
@@ -274,9 +275,10 @@ function parseJsonSafely(value) {
  * @param {object} requestData - Executed request details
  * @param {object|null} [responseData] - Upstream response details (if available)
  * @param {Error|object|string|null} [errorData] - Execution error (if failed)
+ * @param {object|null} [testResults] - Optional assertion evaluation results
  * @returns {Promise<{ success: boolean, id: number, insertId: number }>}
  */
-async function recordExecution(requestData = {}, responseData = null, errorData = null) {
+async function recordExecution(requestData = {}, responseData = null, errorData = null, testResults = null) {
   // 1. Extract and sanitize request metadata
   const rawName = requestData.name || requestData.request_name || null;
   const requestName = rawName && typeof rawName === 'string' ? rawName.trim().slice(0, 255) : null;
@@ -338,13 +340,21 @@ async function recordExecution(requestData = {}, responseData = null, errorData 
     }
   }
 
-  // 5. Execute parameterized INSERT
+  // 5. Test results details (validated and sanitized)
+  const rawTestResults = testResults !== undefined && testResults !== null
+    ? testResults
+    : (requestData.test_results !== undefined ? requestData.test_results : requestData.testResults);
+
+  const sanitizedTestResults = assertionService.validateAndSanitizeTestResults(rawTestResults);
+  const jsonTestResults = sanitizedTestResults ? JSON.stringify(sanitizedTestResults) : null;
+
+  // 6. Execute parameterized INSERT
   const insertSql = `
     INSERT INTO request_history (
       request_name, method, url, request_headers, request_body,
       response_status, response_headers, response_body, response_body_truncated,
-      response_time, error_message
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      response_time, error_message, test_results
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   try {
@@ -359,7 +369,8 @@ async function recordExecution(requestData = {}, responseData = null, errorData 
       responseBody,
       responseBodyTruncated,
       responseTime,
-      errorMessage
+      errorMessage,
+      jsonTestResults
     ]);
 
     return {
@@ -368,6 +379,7 @@ async function recordExecution(requestData = {}, responseData = null, errorData 
       insertId: result.insertId
     };
   } catch (err) {
+    if (err instanceof AppError) throw err;
     throw new AppError(sanitizeDatabaseError(err), 500, 'DATABASE_ERROR');
   }
 }
@@ -475,6 +487,7 @@ async function getHistoryById(id) {
       response_body_truncated,
       response_time,
       error_message,
+      test_results,
       created_at
     FROM request_history
     WHERE id = ?
@@ -500,6 +513,7 @@ async function getHistoryById(id) {
       response_body_truncated: Boolean(row.response_body_truncated),
       response_time: row.response_time,
       error_message: row.error_message,
+      test_results: parseJsonSafely(row.test_results),
       created_at: row.created_at
     };
   } catch (err) {

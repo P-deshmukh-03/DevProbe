@@ -4,9 +4,10 @@
 --
 -- This schema establishes the relational database structure for DevProbe persistence:
 -- - Collections: Logical grouping of saved API requests
--- - Saved Requests: Request configuration including method, URL, headers, params, body
+-- - Saved Requests: Request configuration including method, URL, headers, params, body, assertions
 -- - Environments & Variables: Environment configurations, variables, and AES-256-GCM secrets
--- - Request History: Persistent execution history for dispatched API requests and upstream responses
+-- - Request History: Persistent execution history for dispatched API requests, responses, and test_results
+-- - Day 14: Automated Response Assertion & Testing Engine support
 --
 -- Compatibility: MySQL 5.7+ / MySQL 8.0+ / MariaDB 10.4+ (XAMPP compatible)
 -- Character Set: utf8mb4 (Full Unicode support including emojis and special symbols)
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS `saved_requests` (
   `body` MEDIUMTEXT NULL,
   `body_type` VARCHAR(20) NOT NULL DEFAULT 'none',
   `auth_type` VARCHAR(20) NOT NULL DEFAULT 'none',
+  `assertions` JSON NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -123,6 +125,7 @@ CREATE TABLE IF NOT EXISTS `request_history` (
   `response_body_truncated` BOOLEAN NOT NULL DEFAULT FALSE,
   `response_time` INT UNSIGNED NULL,
   `error_message` TEXT NULL,
+  `test_results` JSON NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   INDEX `idx_history_created_at` (`created_at`),

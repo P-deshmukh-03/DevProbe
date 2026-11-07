@@ -9,6 +9,7 @@
 const { executeQuery, sanitizeDatabaseError } = require('../config/database');
 const { ALLOWED_HTTP_METHODS, ALLOWED_PROTOCOLS, SENSITIVE_HEADERS } = require('../config/security');
 const { AppError } = require('../middleware/errorHandler');
+const assertionService = require('./assertionService');
 
 /**
  * Valid body types supported by DevProbe
@@ -102,6 +103,7 @@ function formatSavedRequest(row) {
     body: row.body !== null ? String(row.body) : null,
     body_type: row.body_type || 'none',
     auth_type: row.auth_type || 'none',
+    assertions: parseJsonColumn(row.assertions),
     created_at: row.created_at,
     updated_at: row.updated_at
   };
@@ -116,7 +118,7 @@ function formatSavedRequest(row) {
  */
 async function getSavedRequests({ collectionId } = {}) {
   try {
-    let sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, created_at, updated_at FROM saved_requests';
+    let sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests';
     const params = [];
 
     if (collectionId !== undefined && collectionId !== null && collectionId !== '') {
@@ -151,7 +153,7 @@ async function getSavedRequestById(id) {
   }
 
   try {
-    const sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(sql, [numericId]);
 
     if (!rows || rows.length === 0) {
@@ -186,7 +188,8 @@ async function createSavedRequest(payload = {}) {
     bodyType,
     auth_type,
     authType,
-    auth
+    auth,
+    assertions
   } = payload;
 
   // 1. Validate request name
@@ -289,12 +292,18 @@ async function createSavedRequest(payload = {}) {
   const rawAuthType = auth_type || authType || (auth && typeof auth === 'object' ? auth.type : null) || 'none';
   const safeAuthType = VALID_AUTH_TYPES.has(String(rawAuthType).toLowerCase()) ? String(rawAuthType).toLowerCase() : 'none';
 
-  // 9. Execute parameterized INSERT
+  // 9. Validate assertion definitions (strictly declarative, no arbitrary JavaScript)
+  const sanitizedAssertions = assertionService.validateAssertions(assertions);
+  const jsonAssertions = sanitizedAssertions && sanitizedAssertions.length > 0
+    ? JSON.stringify(sanitizedAssertions)
+    : null;
+
+  // 10. Execute parameterized INSERT
   try {
     const insertSql = `
       INSERT INTO saved_requests (
-        collection_id, name, method, url, headers, params, body, body_type, auth_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await executeQuery(insertSql, [
@@ -306,11 +315,12 @@ async function createSavedRequest(payload = {}) {
       jsonParams,
       safeBody,
       safeBodyType,
-      safeAuthType
+      safeAuthType,
+      jsonAssertions
     ]);
 
     const createdId = result.insertId;
-    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(fetchSql, [createdId]);
 
     return formatSavedRequest(rows[0]);
@@ -347,7 +357,8 @@ async function updateSavedRequest(id, payload = {}) {
     bodyType,
     auth_type,
     authType,
-    auth
+    auth,
+    assertions
   } = payload;
 
   // 1. Validate request name
@@ -408,7 +419,7 @@ async function updateSavedRequest(id, payload = {}) {
   }
 
   // 4. Verify that the saved request exists (throws 404 if missing)
-  await getSavedRequestById(numericId);
+  const existingRecord = await getSavedRequestById(numericId);
 
   // 5. Validate collection ID and existence if provided
   const targetColId = collection_id !== undefined ? collection_id : collectionId;
@@ -453,7 +464,23 @@ async function updateSavedRequest(id, payload = {}) {
   const rawAuthType = auth_type || authType || (auth && typeof auth === 'object' ? auth.type : null) || 'none';
   const safeAuthType = VALID_AUTH_TYPES.has(String(rawAuthType).toLowerCase()) ? String(rawAuthType).toLowerCase() : 'none';
 
-  // 10. Execute parameterized UPDATE
+  // 10. Handle assertion definitions:
+  // - If assertions is explicitly passed as null or [], clear assertions (set to null)
+  // - If valid array with definitions, validate and store
+  // - If assertions is undefined, preserve existing assertions
+  let jsonAssertions;
+  if (assertions !== undefined) {
+    const sanitizedAssertions = assertionService.validateAssertions(assertions);
+    jsonAssertions = sanitizedAssertions && sanitizedAssertions.length > 0
+      ? JSON.stringify(sanitizedAssertions)
+      : null;
+  } else {
+    jsonAssertions = existingRecord.assertions
+      ? JSON.stringify(existingRecord.assertions)
+      : null;
+  }
+
+  // 11. Execute parameterized UPDATE
   try {
     const updateSql = `
       UPDATE saved_requests SET
@@ -465,7 +492,8 @@ async function updateSavedRequest(id, payload = {}) {
         params = ?,
         body = ?,
         body_type = ?,
-        auth_type = ?
+        auth_type = ?,
+        assertions = ?
       WHERE id = ?
     `;
 
@@ -479,10 +507,11 @@ async function updateSavedRequest(id, payload = {}) {
       safeBody,
       safeBodyType,
       safeAuthType,
+      jsonAssertions,
       numericId
     ]);
 
-    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(fetchSql, [numericId]);
 
     return formatSavedRequest(rows[0]);

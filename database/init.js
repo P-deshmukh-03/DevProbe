@@ -53,6 +53,10 @@ async function initializeDatabase() {
     const [tables] = await connection.query('SHOW TABLES;');
     const tableNames = tables.map(row => Object.values(row)[0]);
 
+    // 5. Apply non-destructive incremental migrations for pre-existing tables
+    console.log(`Checking schema migrations for '${config.database}'...`);
+    await applyMigrations(connection, config.database);
+
     console.log(`✓ Database '${config.database}' is ready with tables:`, tableNames.join(', '));
     return { success: true, tables: tableNames };
   } catch (err) {
@@ -67,6 +71,48 @@ async function initializeDatabase() {
   }
 }
 
+/**
+ * Idempotently applies incremental column migrations to ensure existing tables
+ * match the latest schema requirements without destructive changes.
+ *
+ * @param {mysql.Connection} connection - Active MySQL connection
+ * @param {string} databaseName - Name of target database
+ */
+async function applyMigrations(connection, databaseName) {
+  async function columnExists(tableName, columnName) {
+    const [rows] = await connection.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [databaseName, tableName, columnName]
+    );
+    return rows.length > 0;
+  }
+
+  // Day 14 Migration 1: Add assertions JSON NULL to saved_requests if missing
+  const hasAssertions = await columnExists('saved_requests', 'assertions');
+  if (!hasAssertions) {
+    console.log('Applying Day 14 migration: adding `assertions` column to `saved_requests`...');
+    await connection.query(
+      'ALTER TABLE `saved_requests` ADD COLUMN `assertions` JSON NULL AFTER `auth_type`;'
+    );
+    console.log('✓ Added `assertions` column to `saved_requests`.');
+  } else {
+    console.log('✓ Column `saved_requests.assertions` already present.');
+  }
+
+  // Day 14 Migration 2: Add test_results JSON NULL to request_history if missing
+  const hasTestResults = await columnExists('request_history', 'test_results');
+  if (!hasTestResults) {
+    console.log('Applying Day 14 migration: adding `test_results` column to `request_history`...');
+    await connection.query(
+      'ALTER TABLE `request_history` ADD COLUMN `test_results` JSON NULL AFTER `error_message`;'
+    );
+    console.log('✓ Added `test_results` column to `request_history`.');
+  } else {
+    console.log('✓ Column `request_history.test_results` already present.');
+  }
+}
+
 // Execute if run directly from command line
 if (require.main === module) {
   initializeDatabase().then(result => {
@@ -74,5 +120,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { initializeDatabase };
+module.exports = { initializeDatabase, applyMigrations };
 
