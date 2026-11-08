@@ -36,6 +36,7 @@ const { initializeDatabase, applyMigrations } = require('./database/init');
 const assertionService = require('./src/services/assertionService');
 const savedRequestService = require('./src/services/savedRequestService');
 const historyService = require('./src/services/historyService');
+const assertionEngine = require('./public/js/assertionEngine');
 const { AppError } = require('./src/middleware/errorHandler');
 
 let passedTests = 0;
@@ -927,9 +928,331 @@ async function runTests() {
     assert(sanitizedSecResults.results[2].expected === '[REDACTED]', 'TEST 105: Sensitive password property expected is [REDACTED]');
     assert(sanitizedSecResults.results[2].actual === '[REDACTED]', 'TEST 106: Sensitive password property actual is [REDACTED]');
 
+    // -------------------------------------------------------------------------
+    // Phase 8: Client-Side Assertion Evaluation Engine Tests (Day 14 Step 3)
+    // -------------------------------------------------------------------------
+    console.log('\n--- Phase 8: Client-Side Assertion Evaluation Engine Tests ---');
+
+    const sampleResponse = {
+      status: 200,
+      statusText: 'OK',
+      timeMs: 145,
+      sizeBytes: 420,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-request-id': 'req_xyz_12345',
+        'authorization': 'Bearer live_secret_auth_token_999',
+        'set-cookie': 'sessionid=sec_session_token_abc; Path=/; HttpOnly'
+      },
+      body: {
+        success: true,
+        data: {
+          user: {
+            id: 42,
+            name: 'Alice Cooper',
+            role: 'admin',
+            profile: null,
+            password: 'SuperSecretUserPassword123!'
+          },
+          users: [
+            { id: 1, name: 'Alice' },
+            { id: 2, name: 'Bob' }
+          ],
+          items: [
+            { id: 101, name: 'Widget A', price: 9.99 },
+            { id: 102, name: 'Widget B', price: 19.99 }
+          ],
+          metrics: {
+            count: 5,
+            active: true
+          }
+        }
+      },
+      rawText: '{"success":true,"data":{"user":{"id":42,"name":"Alice Cooper","role":"admin","profile":null,"password":"SuperSecretUserPassword123!"},"users":[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}],"items":[{"id":101,"name":"Widget A","price":9.99},{"id":102,"name":"Widget B","price":19.99}],"metrics":{"count":5,"active":true}}}'
+    };
+
+    // Deep clone snapshot for immutability verification
+    const responseSnapshotBefore = JSON.stringify(sampleResponse);
+
+    // 1. Status code equals
+    const r1Pass = assertionEngine.evaluateAssertions([
+      { id: 'a1_pass', type: 'status_code', operator: 'equals', expected: 200 }
+    ], sampleResponse);
+    const r1Fail = assertionEngine.evaluateAssertions([
+      { id: 'a1_fail', type: 'status_code', operator: 'equals', expected: 404 }
+    ], sampleResponse);
+    assert(r1Pass.summary.passed === 1 && r1Pass.results[0].passed === true &&
+           r1Fail.summary.failed === 1 && r1Fail.results[0].passed === false,
+           'TEST 107: Status code equals passes on 200 and fails on 404');
+
+    // 2. Status code not_equals
+    const r2Pass = assertionEngine.evaluateAssertions([
+      { id: 'a2_pass', type: 'status_code', operator: 'not_equals', expected: 404 }
+    ], sampleResponse);
+    const r2Fail = assertionEngine.evaluateAssertions([
+      { id: 'a2_fail', type: 'status_code', operator: 'not_equals', expected: 200 }
+    ], sampleResponse);
+    assert(r2Pass.results[0].passed === true && r2Fail.results[0].passed === false,
+           'TEST 108: Status code not_equals passes when different and fails when identical');
+
+    // 3. Status numeric comparisons (less_than, greater_than, less_than_or_equal, greater_than_or_equal)
+    const r3 = assertionEngine.evaluateAssertions([
+      { id: 'a3_lt', type: 'status_code', operator: 'less_than', expected: 300 },
+      { id: 'a3_gt', type: 'status_code', operator: 'greater_than', expected: 100 },
+      { id: 'a3_lte', type: 'status_code', operator: 'less_than_or_equal', expected: 200 },
+      { id: 'a3_gte', type: 'status_code', operator: 'greater_than_or_equal', expected: 200 },
+      { id: 'a3_fail_lt', type: 'status_code', operator: 'less_than', expected: 200 },
+      { id: 'a3_fail_gt', type: 'status_code', operator: 'greater_than', expected: 300 }
+    ], sampleResponse);
+    assert(r3.summary.passed === 4 && r3.summary.failed === 2,
+           'TEST 109: Status code numeric comparisons (<, >, <=, >=) evaluate correctly');
+
+    // 4. Response-time comparisons
+    const r4 = assertionEngine.evaluateAssertions([
+      { id: 'a4_lt', type: 'response_time', operator: 'less_than', expected: 200 },
+      { id: 'a4_gt', type: 'response_time', operator: 'greater_than', expected: 100 },
+      { id: 'a4_lte', type: 'response_time', operator: 'less_than_or_equal', expected: 145 },
+      { id: 'a4_gte', type: 'response_time', operator: 'greater_than_or_equal', expected: 145 },
+      { id: 'a4_eq', type: 'response_time', operator: 'equals', expected: 145 },
+      { id: 'a4_neq', type: 'response_time', operator: 'not_equals', expected: 500 },
+      { id: 'a4_fail_lt', type: 'response_time', operator: 'less_than', expected: 100 }
+    ], sampleResponse);
+    assert(r4.summary.passed === 6 && r4.summary.failed === 1,
+           'TEST 110: Response time comparisons (<, >, <=, >=, ==, !=) evaluate safely');
+
+    // 5. Header existence
+    const r5Pass = assertionEngine.evaluateAssertions([
+      { id: 'a5_pass', type: 'header', property: 'content-type', operator: 'exists' }
+    ], sampleResponse);
+    const r5Fail = assertionEngine.evaluateAssertions([
+      { id: 'a5_fail', type: 'header', property: 'x-missing-header', operator: 'exists' }
+    ], sampleResponse);
+    assert(r5Pass.results[0].passed === true && r5Fail.results[0].passed === false,
+           'TEST 111: Header exists operator passes on existing header and fails on missing header');
+
+    // 6. Header non-existence
+    const r6Pass = assertionEngine.evaluateAssertions([
+      { id: 'a6_pass', type: 'header', property: 'x-missing-header', operator: 'not_exists' }
+    ], sampleResponse);
+    const r6Fail = assertionEngine.evaluateAssertions([
+      { id: 'a6_fail', type: 'header', property: 'content-type', operator: 'not_exists' }
+    ], sampleResponse);
+    assert(r6Pass.results[0].passed === true && r6Fail.results[0].passed === false,
+           'TEST 112: Header not_exists operator passes when header is absent and fails when present');
+
+    // 7. Header case-insensitive matching
+    const r7 = assertionEngine.evaluateAssertions([
+      { id: 'a7_1', type: 'header', property: 'Content-Type', operator: 'exists' },
+      { id: 'a7_2', type: 'header', property: 'CONTENT-TYPE', operator: 'contains', expected: 'json' },
+      { id: 'a7_3', type: 'header', property: 'X-Request-ID', operator: 'equals', expected: 'req_xyz_12345' }
+    ], sampleResponse);
+    assert(r7.summary.passed === 3 && r7.summary.status === 'passed',
+           'TEST 113: Header matching is strictly case-insensitive across various casings');
+
+    // 8. Header value comparisons
+    const r8 = assertionEngine.evaluateAssertions([
+      { id: 'a8_eq', type: 'header', property: 'content-type', operator: 'equals', expected: 'application/json; charset=utf-8' },
+      { id: 'a8_neq', type: 'header', property: 'content-type', operator: 'not_equals', expected: 'text/html' },
+      { id: 'a8_contains', type: 'header', property: 'content-type', operator: 'contains', expected: 'application/json' },
+      { id: 'a8_not_contains', type: 'header', property: 'content-type', operator: 'not_contains', expected: 'application/xml' },
+      { id: 'a8_fail_eq', type: 'header', property: 'content-type', operator: 'equals', expected: 'text/plain' },
+      { id: 'a8_fail_contains', type: 'header', property: 'content-type', operator: 'contains', expected: 'multipart' }
+    ], sampleResponse);
+    assert(r8.summary.passed === 4 && r8.summary.failed === 2,
+           'TEST 114: Header value comparisons (equals, not_equals, contains, not_contains) evaluate correctly');
+
+    // 9. Body contains and not_contains
+    const r9 = assertionEngine.evaluateAssertions([
+      { id: 'a9_contains', type: 'body_text', operator: 'contains', expected: 'Widget A' },
+      { id: 'a9_not_contains', type: 'body_text', operator: 'not_contains', expected: 'NonExistentItem999' },
+      { id: 'a9_fail_contains', type: 'body_text', operator: 'contains', expected: 'NonExistentItem999' }
+    ], sampleResponse);
+    assert(r9.results[0].passed === true && r9.results[1].passed === true && r9.results[2].passed === false,
+           'TEST 115: Body text contains and not_contains evaluate accurately');
+
+    // 10. Body equals and not_equals
+    const plainTextResponse = { status: 200, headers: {}, body: 'Hello DevProbe', rawText: 'Hello DevProbe' };
+    const r10 = assertionEngine.evaluateAssertions([
+      { id: 'a10_eq', type: 'body_text', operator: 'equals', expected: 'Hello DevProbe' },
+      { id: 'a10_neq', type: 'body_text', operator: 'not_equals', expected: 'Goodbye DevProbe' },
+      { id: 'a10_fail_eq', type: 'body_text', operator: 'equals', expected: 'Goodbye DevProbe' }
+    ], plainTextResponse);
+    assert(r10.summary.passed === 2 && r10.summary.failed === 1,
+           'TEST 116: Body text equals and not_equals evaluate accurately against body content');
+
+    // 11. JSON path primitive equality
+    const r11 = assertionEngine.evaluateAssertions([
+      { id: 'a11_1', type: 'json_path', property: 'data.user.id', operator: 'equals', expected: 42 },
+      { id: 'a11_2', type: 'json_path', property: 'data.user.role', operator: 'equals', expected: 'admin' },
+      { id: 'a11_3', type: 'json_path', property: 'data.metrics.active', operator: 'equals', expected: true },
+      { id: 'a11_4', type: 'json_path', property: 'data.user.role', operator: 'not_equals', expected: 'guest' },
+      { id: 'a11_fail', type: 'json_path', property: 'data.user.id', operator: 'equals', expected: 99 }
+    ], sampleResponse);
+    assert(r11.summary.passed === 4 && r11.summary.failed === 1,
+           'TEST 117: JSON path primitive equality (numbers, strings, booleans) matches correctly');
+
+    // 12. JSON path array indexing
+    const r12 = assertionEngine.evaluateAssertions([
+      { id: 'a12_1', type: 'json_path', property: 'data.users[0].name', operator: 'equals', expected: 'Alice' },
+      { id: 'a12_2', type: 'json_path', property: 'data.users[1].name', operator: 'equals', expected: 'Bob' },
+      { id: 'a12_3', type: 'json_path', property: 'data.items[1].price', operator: 'equals', expected: 19.99 },
+      { id: 'a12_4', type: 'json_path', property: 'data.items[0].id', operator: 'equals', expected: 101 }
+    ], sampleResponse);
+    assert(r12.summary.passed === 4 && r12.summary.status === 'passed',
+           'TEST 118: JSON path bracket array indexing resolves elements and nested properties');
+
+    // 13. JSON path missing properties
+    const r13 = assertionEngine.evaluateAssertions([
+      { id: 'a13_exists_fail', type: 'json_path', property: 'data.user.missing_field', operator: 'exists' },
+      { id: 'a13_not_exists_pass', type: 'json_path', property: 'data.user.missing_field', operator: 'not_exists' },
+      { id: 'a13_eq_fail', type: 'json_path', property: 'data.user.missing_field', operator: 'equals', expected: 'foo' }
+    ], sampleResponse);
+    assert(r13.results[0].passed === false && r13.results[1].passed === true && r13.results[2].passed === false &&
+           (r13.results[0].message.includes('not found') || r13.results[0].message.includes('not exist')),
+           'TEST 119: Missing JSON path properties fail existence/equality cleanly with descriptive messages');
+
+    // 14. JSON null handling
+    const r14 = assertionEngine.evaluateAssertions([
+      { id: 'a14_exists', type: 'json_path', property: 'data.user.profile', operator: 'exists' },
+      { id: 'a14_eq_null', type: 'json_path', property: 'data.user.profile', operator: 'equals', expected: null },
+      { id: 'a14_neq', type: 'json_path', property: 'data.user.profile', operator: 'not_equals', expected: 'something' }
+    ], sampleResponse);
+    assert(r14.summary.passed === 3 && r14.results[0].actual === null,
+           'TEST 120: JSON null values are accurately distinguished from missing properties');
+
+    // 15. JSON numeric comparisons
+    const r15 = assertionEngine.evaluateAssertions([
+      { id: 'a15_lt', type: 'json_path', property: 'data.items[1].price', operator: 'less_than', expected: 25 },
+      { id: 'a15_gt', type: 'json_path', property: 'data.items[1].price', operator: 'greater_than', expected: 10 },
+      { id: 'a15_lte', type: 'json_path', property: 'data.metrics.count', operator: 'less_than_or_equal', expected: 5 },
+      { id: 'a15_gte', type: 'json_path', property: 'data.metrics.count', operator: 'greater_than_or_equal', expected: 5 },
+      { id: 'a15_fail_lt', type: 'json_path', property: 'data.items[1].price', operator: 'less_than', expected: 15 }
+    ], sampleResponse);
+    assert(r15.summary.passed === 4 && r15.summary.failed === 1,
+           'TEST 121: JSON numeric comparisons (<, >, <=, >=) evaluate correctly on float and int fields');
+
+    // 16. JSON malformed response
+    const malformedResponse = { status: 200, headers: { 'content-type': 'application/json' }, body: null, rawText: '{"not_valid_json: 123' };
+    const r16 = assertionEngine.evaluateAssertions([
+      { id: 'a16', type: 'json_path', property: 'data.user', operator: 'exists' }
+    ], malformedResponse);
+    assert(r16.summary.failed === 1 && r16.results[0].passed === false && r16.results[0].message.includes('Invalid JSON'),
+           'TEST 122: Malformed JSON response body produces safe assertion failure without unhandled throw');
+
+    // 17. Malformed assertion definitions
+    const r17 = assertionEngine.evaluateAssertions([
+      null,
+      'not an object',
+      { id: 'a17_valid', type: 'status_code', operator: 'equals', expected: 200 },
+      { id: 'a17_bad_type', type: 'invalid_type_xyz', operator: 'equals', expected: 123 }
+    ], sampleResponse);
+    assert(r17.summary.total === 4 && r17.summary.passed === 1 && r17.summary.failed === 3 &&
+           r17.results[0].passed === false && r17.results[2].passed === true,
+           'TEST 123: Malformed assertion definitions in array fail safely without aborting valid assertions');
+
+    // 18. Disabled assertions
+    const r18 = assertionEngine.evaluateAssertions([
+      { id: 'a18_enabled_1', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'a18_disabled_fail', type: 'status_code', operator: 'equals', expected: 500, enabled: false },
+      { id: 'a18_enabled_2', type: 'header', property: 'content-type', operator: 'exists', enabled: true }
+    ], sampleResponse);
+    assert(r18.summary.total === 2 && r18.summary.passed === 2 && r18.summary.failed === 0 && r18.summary.status === 'passed',
+           'TEST 124: Disabled assertions (enabled: false) are excluded from evaluation and summary totals');
+
+    // 19. No configured assertions
+    const r19Empty = assertionEngine.evaluateAssertions([], sampleResponse);
+    const r19Null = assertionEngine.evaluateAssertions(null, sampleResponse);
+    const r19Undef = assertionEngine.evaluateAssertions(undefined, sampleResponse);
+    const r19AllDisabled = assertionEngine.evaluateAssertions([
+      { id: 'd1', type: 'status_code', operator: 'equals', expected: 200, enabled: false }
+    ], sampleResponse);
+    assert(r19Empty.summary.status === 'unevaluated' && r19Null.summary.status === 'unevaluated' &&
+           r19Undef.summary.status === 'unevaluated' && r19AllDisabled.summary.status === 'unevaluated' &&
+           r19Empty.summary.total === 0,
+           'TEST 125: No enabled or configured assertions consistently return unevaluated summary state');
+
+    // 20. Mixed passing and failing assertions
+    const r20 = assertionEngine.evaluateAssertions([
+      { id: 'a20_pass1', type: 'status_code', operator: 'equals', expected: 200 },
+      { id: 'a20_fail', type: 'status_code', operator: 'equals', expected: 404 },
+      { id: 'a20_pass2', type: 'header', property: 'content-type', operator: 'exists' }
+    ], sampleResponse);
+    assert(r20.summary.total === 3 && r20.summary.passed === 2 && r20.summary.failed === 1 && r20.summary.status === 'failed',
+           'TEST 126: Mixed results correctly report total, passed, failed, and overall status: failed');
+
+    // 21. Empty response body
+    const emptyResponse = { status: 204, statusText: 'No Content', headers: {}, body: null, rawText: '' };
+    const r21 = assertionEngine.evaluateAssertions([
+      { id: 'a21_status', type: 'status_code', operator: 'equals', expected: 204 },
+      { id: 'a21_body', type: 'body_text', operator: 'equals', expected: '' },
+      { id: 'a21_json', type: 'json_path', property: 'data', operator: 'exists' }
+    ], emptyResponse);
+    assert(r21.results[0].passed === true && r21.results[1].passed === true && r21.results[2].passed === false,
+           'TEST 127: Empty response body (e.g. 204 No Content) evaluated safely across body and JSON types');
+
+    // 22. Sensitive header redaction
+    const r22 = assertionEngine.evaluateAssertions([
+      { id: 'a22_auth', type: 'header', property: 'authorization', operator: 'exists' },
+      { id: 'a22_cookie', type: 'header', property: 'set-cookie', operator: 'exists' }
+    ], sampleResponse);
+    const r22Json = JSON.stringify(r22);
+    assert(r22.results[0].actual === '[REDACTED]' && r22.results[1].actual === '[REDACTED]' &&
+           !r22Json.includes('live_secret_auth_token_999') && !r22Json.includes('sec_session_token_abc'),
+           'TEST 128: Sensitive header values (Authorization, Set-Cookie) are redacted in evaluation results');
+
+    // 23. Sensitive JSON property redaction
+    const r23 = assertionEngine.evaluateAssertions([
+      { id: 'a23_pwd', type: 'json_path', property: 'data.user.password', operator: 'exists' }
+    ], sampleResponse);
+    const r23Json = JSON.stringify(r23);
+    assert(r23.results[0].actual === '[REDACTED]' && !r23Json.includes('SuperSecretUserPassword123!'),
+           'TEST 129: Sensitive JSON path properties (e.g. password) are redacted in evaluation results');
+
+    // 24. Prototype-pollution path rejection
+    const r24 = assertionEngine.evaluateAssertions([
+      { id: 'a24_proto', type: 'json_path', property: '__proto__.polluted', operator: 'exists' },
+      { id: 'a24_ctor', type: 'json_path', property: 'constructor.prototype.isAdmin', operator: 'exists' },
+      { id: 'a24_nested_proto', type: 'json_path', property: 'data.user.prototype.hacked', operator: 'exists' }
+    ], sampleResponse);
+    assert(r24.summary.failed === 3 &&
+           r24.results[0].message.includes('Prototype pollution') &&
+           r24.results[1].message.includes('Prototype pollution') &&
+           r24.results[2].message.includes('Prototype pollution') &&
+           ({}).polluted === undefined && ({}).isAdmin === undefined,
+           'TEST 130: Prototype pollution paths (__proto__, constructor, prototype) are strictly blocked');
+
+    // 25. Confirm original response object is not modified (Immutability)
+    const responseSnapshotAfter = JSON.stringify(sampleResponse);
+    assert(responseSnapshotBefore === responseSnapshotAfter,
+           'TEST 131: Assertion evaluation engine guarantees response object immutability');
+
+    // 26. Confirm assertion failure does not change HTTP execution success
+    const httpSuccessExecution = { success: true, status: 200, timeMs: 50, headers: {}, body: { ok: true } };
+    const r26 = assertionEngine.evaluateAssertions([
+      { id: 'a26_fail', type: 'status_code', operator: 'equals', expected: 500 }
+    ], httpSuccessExecution);
+    assert(r26.summary.status === 'failed' && httpSuccessExecution.success === true && httpSuccessExecution.status === 200,
+           'TEST 132: Failing assertions do not alter HTTP execution success or mutate status code');
+
+    // 27. Confirm one malformed assertion does not crash the entire evaluation
+    const mixedRes = assertionEngine.evaluateAssertions([
+      null,
+      { id: 'a27_pass', type: 'status_code', operator: 'equals', expected: 200 },
+      undefined,
+      { id: 'a27_fail', type: 'status_code', operator: 'equals', expected: 404 }
+    ], sampleResponse);
+    assert(mixedRes.summary.total === 4 && mixedRes.summary.passed === 1 && mixedRes.summary.failed === 3 &&
+           mixedRes.results[1].passed === true && mixedRes.results[3].passed === false,
+           'TEST 133: Entire evaluation survives multiple malformed entries with individual fault isolation');
+
+    // 28. Cross-layer integration: Output is directly accepted by backend test_results validator
+    const backendValidation = assertionService.validateAndSanitizeTestResults(r20);
+    assert(backendValidation !== null && backendValidation.summary.total === 3 && backendValidation.summary.status === 'failed',
+           'TEST 134: Client-side evaluation engine output structure is 100% compliant with backend test_results persistence schema');
+
   } finally {
     // -------------------------------------------------------------------------
-    // Phase 8: Teardown & Resource Cleanup
+    // Phase 9: Teardown & Resource Cleanup
     // -------------------------------------------------------------------------
     console.log('\n--- Teardown: Cleaning Test Data & Closing Servers ---');
     try {
@@ -957,7 +1280,7 @@ async function runTests() {
   // Final Results
   // =========================================================================
   console.log('\n===========================================');
-  console.log(`Day 14 Step 2 Tests: ${passedTests}/${totalTests} Passed`);
+  console.log(`Day 14 Step 3 Tests: ${passedTests}/${totalTests} Passed`);
   console.log('===========================================\n');
 
   if (passedTests !== totalTests) {
