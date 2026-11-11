@@ -19,7 +19,7 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 
 ## 📅 Current Development Status
 
-**Day 13 of 16 — Request Execution History, Audit Trail & Response Comparison**
+**Day 14 of 16 — Automated API Response Assertion & Testing Engine**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
@@ -35,6 +35,7 @@ Completed Milestones:
 - **Day 11**: Full collection and saved request management: updating collections (`PUT /api/collections/:id`), safe collection deletion (`DELETE /api/collections/:id`) with automatic foreign key disassociation (`ON DELETE SET NULL`), saved request modification (`PUT /api/requests/saved/:id`), saved request deletion (`DELETE /api/requests/saved/:id`), interactive dark-theme workspace modals, and frontend non-dispatch verification.
 - **Day 12**: Complete Postman-style environment management: relational MySQL schema (`environments`, `environment_variables`) with `ON DELETE CASCADE`, AES-256-GCM secret encryption at rest via dedicated `DEVPROBE_ENCRYPTION_KEY`, API response secret masking (`••••••••`), secret preservation on update, atomic environment activation/deactivation, dynamic variable resolution across URLs, query params, headers, body, and auth on cloned execution payloads, SSRF integration blocking resolved loopback/metadata targets, dark-theme Environment Manager modal, and Quick View popover.
 - **Day 13**: Request execution history persistence and response comparison engine: relational MySQL schema (`request_history`), non-blocking fire-and-forget execution recording for both successful and failed outbound requests, multi-tier sanitization and redaction (Basic auth, query secrets, Authorization, Cookie, Set-Cookie, passwords, tokens), hard 64 KB response body storage cap with truncation flag, RESTful History API (`GET`/`DELETE /api/history`, `GET`/`DELETE /api/history/:id`), dynamic History sidebar with pagination, History Detail inspection modal, workspace loading, single and clear-all deletion, and side-by-side Response Comparison with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards.
+- **Day 14**: Automated API response testing and declarative assertion evaluation engine: schema migrations adding `saved_requests.assertions` JSON column and `request_history.test_results` JSON column; centralized backend validation service (`assertionService`) supporting 5 assertion categories (`status_code`, `response_time`, `header`, `body_text`, `json_path`) with strict operator and prototype-pollution enforcement; client-side assertion evaluation engine (`public/js/assertionEngine.js`) executing across browser and Node environments with 100% declarative safety (no eval/Function), credential redaction (`[REDACTED]`), and fault isolation; interactive Assertion Builder UI in request editor with live count badge, category-specific fields, and sensitive property existence restriction; live Test Results panel in response inspector with PASS/FAIL counters, status banners, individual cards, and expected/actual comparison rows; non-blocking execution recording of `test_results` in `request_history`; historical test results display in History Detail Modal without re-evaluation; and 183 automated verification tests with zero regressions.
 
 ## ✨ Features
 
@@ -47,8 +48,8 @@ Completed Milestones:
 - [x] **Environment Management & Dynamic Variables** — Postman-style environments with AES-256-GCM encrypted secrets, Quick Look popover, and variable resolution across URLs, headers, body, and auth (Day 12).
 - [x] **Request Execution History & Audit Trail** — Non-blocking recording of successful and failed outbound API executions in relational MySQL (`request_history`), pagination, 64 KB storage caps, and multi-tier credential sanitization (Day 13).
 - [x] **Side-by-Side Response Comparison** — Developer comparison engine comparing two saved history executions side-by-side with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards (Day 13).
+- [x] **Automated API Response Testing** — Automated declarative response testing across status codes, response latencies, response headers, body text, and JSON paths with builder UI and inspector results panel (Day 14).
 - [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
-- [ ] **Automated API Testing** — Assert status codes, response times, and JSON schema.
 - [ ] **API Documentation Generator** — Generate shareable documentation from saved requests.
 - [ ] **Import / Export** — Import and export Postman / OpenAPI collections.
 
@@ -66,7 +67,8 @@ DevProbe/
 │   ├── css/
 │   │   └── style.css               # Dark-theme CSS design system & response viewer styles
 │   └── js/
-│       └── app.js                  # Frontend state management, Send button dispatch, & response renderer
+│       ├── app.js                  # Frontend state management, Send button dispatch, assertion builder & response renderer
+│       └── assertionEngine.js      # Client-side declarative assertion evaluation engine
 │
 ├── src/
 │   ├── app.js                      # Express application entry point, health check, & database readiness
@@ -89,6 +91,7 @@ DevProbe/
 │   │   ├── requestRoutes.js        # Request configuration route definitions
 │   │   └── savedRequestRoutes.js   # Saved request routes (GET, POST, PUT, DELETE)
 │   └── services/
+│       ├── assertionService.js     # Assertion validation, category operator rules, prototype-pollution guards & test results sanitization
 │       ├── collectionService.js    # Collection persistence & safe deletion service
 │       ├── environmentService.js   # Environment & variable CRUD, AES-256-GCM encryption, & masking service
 │       ├── historyService.js       # Execution recording, multi-tier redaction, 64 KB truncation, & pagination service
@@ -106,6 +109,7 @@ DevProbe/
 ├── test-day11.js                   # Day 11 automated management test suite (83 tests)
 ├── test-day12.js                   # Day 12 automated environment management test suite (101 tests)
 ├── test-day13.js                   # Day 13 automated history & comparison test suite (274 tests)
+├── test-day14.js                   # Day 14 automated response assertions & testing test suite (183 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -125,6 +129,7 @@ DevProbe adheres to a structured, layered architecture:
 - **`src/middleware/errorHandler.js`**: Intercepts JSON syntax errors, payload size limits (413), validation errors (400), unknown routes (404), and upstream network errors. Guarantees consistent JSON error structures and prevents leakage of internal stack traces, filesystem paths, or secrets.
 - **`src/services/requestService.js`**: Implements the real outbound HTTP/HTTPS execution engine with DNS pre-resolution, socket-level connection pinning, manual redirect loop with cross-origin credential stripping, streaming response size caps, and monotonic latency measurement. Also provides the preparation-only normalization service for `/validate`.
 - **`src/controllers/requestController.js`**: Handles incoming API requests for validation and execution, delegating to `requestService` and returning structured responses.
+- **`src/services/assertionService.js`**: Centralized assertion validation service: validates and normalizes assertion definitions across all 5 supported categories (`status_code`, `response_time`, `header`, `body_text`, `json_path`), enforces category-specific operators and type coercions, blocks prototype pollution (`__proto__`, `constructor`, `prototype`), rejects code injection attempts (`eval`, `Function`, `process.*`), and sanitizes sensitive credentials in test results.
 - **`src/services/collectionService.js`**: Provides collection business logic: creating collections, querying all collections or single collection by ID, updating name and description, and deleting collections safely while preserving child requests by setting `collection_id = NULL`.
 - **`src/controllers/collectionController.js`**: Handles collection HTTP requests (`GET /`, `GET /:id`, `POST /`, `PUT /:id`, `DELETE /:id`).
 - **`src/services/savedRequestService.js`**: Manages saved request persistence: validation, header and credential scrubbing (stripping tokens, passwords, cookies), creating, listing with optional `collectionId` filter, fetching by ID, updating request definitions, and deleting saved requests.
@@ -651,7 +656,7 @@ curl http://localhost:3000/api/health/db
 
 ## 🧪 Automated Testing
 
-DevProbe features a multi-tiered automated test suite with **1,028 passing tests** across 11 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, collection/request management, environment variable resolution, request execution history, and side-by-side response comparison:
+DevProbe features a multi-tiered automated test suite with **1,211 passing tests** across 12 test suites, verifying client state, backend validation, SSRF security, real HTTP execution, response formatting, database integration, collections persistence, collection/request management, environment variable resolution, request execution history, side-by-side response comparison, and automated response assertions:
 
 ```bash
 # Run full regression suite (Day 3 through Day 12 — 754 total tests)
@@ -659,6 +664,9 @@ npm test
 
 # Run Day 13 verification suite (History & Comparison — 274 total tests)
 npm run test:day13
+
+# Run Day 14 verification suite (Response Assertions & Testing — 183 total tests)
+npm run test:day14
 
 # Run individual test suites
 npm run test:day3    # Day 3: Frontend state & parameter parsing (34 tests)
@@ -672,6 +680,7 @@ npm run test:day10   # Day 10: Collections & saved requests persistence (88 test
 npm run test:day11   # Day 11: Saved request & collection management (83 tests)
 npm run test:day12   # Day 12: Environment management & dynamic variable resolution (101 tests)
 npm run test:day13   # Day 13: Request execution history & response comparison (274 tests)
+npm run test:day14   # Day 14: Automated response assertions & testing engine (183 tests)
 ```
 
 ### Day 10 Test Coverage (88 Tests)
@@ -743,6 +752,147 @@ npm run test:day13   # Day 13: Request execution history & response comparison (
   - HTML and script injection resistance (XSS payloads and script tags rendered safely as literal text).
   - Credential protection: comparison payloads never leak URL secrets, Authorization headers, passwords, or Set-Cookie session tokens.
 
+### Day 14 Test Coverage (183 Tests)
+- **Phase 1 & 2**: Database health check, schema file declarations (`saved_requests.assertions`, `request_history.test_results`).
+- **Phase 3 & 4**: Live MySQL column inspection, nullable verification, and migration idempotency.
+- **Phase 5**: Centralized Assertion Validation Service (`src/services/assertionService.js`):
+  - Valid models for all 5 categories (`status_code`, `response_time`, `header`, `body_text`, `json_path`).
+  - Aliases normalization (`status` to `status_code`).
+  - Existence operators accepted without expected values (`exists`, `not_exists`).
+  - Rejection of invalid types, unsupported operators, missing IDs/properties/expected values, and duplicate IDs.
+  - Expected type validation (numeric status code, latency threshold, array lengths <= 50).
+  - Prototype pollution blocking (`__proto__`, `constructor`, `prototype`).
+  - Code injection rejection (`eval`, `process.*`, `<script>`) while preserving legitimate descriptive text.
+- **Phase 6**: Saved request assertion persistence integration (`POST`, `GET`, `PUT`, clearing with `null`, clearing with `[]`, omitting assertions preservation, and requests without assertions).
+- **Phase 7**: History test results persistence, structure validation, and multi-tier credential sanitization (`Bearer [REDACTED]`, `password`, `secret_key`, session cookies).
+- **Phase 8**: Client-side assertion evaluation engine (`public/js/assertionEngine.js`):
+  - Status code equality, inequality, and numeric boundaries (<, >, <=, >=).
+  - Latency threshold checks.
+  - Header matching case-insensitivity, equality, containment, and existence.
+  - Body text containment and exact equality.
+  - JSON path dot notation and bracket array indexing.
+  - Missing JSON properties vs explicit null values.
+  - Malformed JSON fallback and individual fault isolation.
+  - Non-mutation of underlying HTTP response objects.
+- **Phase 9**: Assertion Builder UI & Client-Side State Management:
+  - ID generation with unique category prefixes.
+  - Sensitive header and property detection with automatic security notice display.
+  - Auto-detection and explicit parsing of expected values (number, string, boolean, null).
+  - Form population, update-in-place, and active checkbox toggling.
+  - Deletion, clearing, and deep-copy template conversion with state isolation.
+- **Phase 10**: Test Results Panel & Execution Integration:
+  - HTTP 200 with all assertions passing (green badges, summary counters).
+  - HTTP 200 with failing assertions (red badges, preserved HTTP 200 status).
+  - HTTP 404/500 upstream error evaluation against assertions.
+  - Transport and network error handling (`ECONNREFUSED`, timeout) with diagnostic messages.
+  - Empty and disabled assertion states.
+  - Sensitive Authorization and JSON property masking in rendered result cards.
+  - Persistence of `test_results` via `POST /api/requests/execute` and retrieval via `GET /api/history/:id`.
+  - Legacy history records (`test_results: NULL`) handled gracefully in History Detail Modal.
+  - Immutability of historical test results without re-evaluation.
+  - Single history row guarantee (no duplicate logging).
+  - Backward compatibility of response viewer tabs and response comparison engine.
+
+## Automated API Response Testing
+
+### 1. Feature Overview
+DevProbe's Automated API Response Testing engine enables developers to configure declarative, contract-based assertions for HTTP requests without writing custom code or scripts. When an API request is dispatched, active assertions are evaluated in-memory against the actual HTTP response—verifying status codes, roundtrip latencies, response headers, body text, and nested JSON paths. Evaluation results are summarized live in the response inspector, badged in real time, and persisted immutably with execution history and saved requests.
+
+### 2. Supported Assertion Types
+DevProbe supports five specialized assertion categories:
+- **Status Code (`status_code`)**: Evaluates HTTP response status codes (e.g. 200, 201, 404, 500) against expected integer values or numeric boundaries.
+- **Response Time (`response_time`)**: Verifies roundtrip execution duration in milliseconds against performance SLA targets.
+- **Response Header (`header`)**: Evaluates response header presence, absence, exact equality, or substring containment with case-insensitive header matching.
+- **Response Body Text (`body_text`)**: Evaluates full response body text (raw or formatted) for substring presence or exact equality.
+- **JSON Path (`json_path`)**: Navigates parsed JSON payloads using standard dot-notation (`data.user.id`) and array bracket indexing (`items[0].name`), evaluating values against primitives (numbers, strings, booleans, null) or presence conditions.
+
+### 3. Supported Operators
+Each assertion category provides a strictly validated set of operators:
+- **Status Code**: `equals`, `not_equals`, `less_than`, `greater_than`, `less_than_or_equal`, `greater_than_or_equal`.
+- **Response Time**: `less_than`, `greater_than`, `less_than_or_equal`, `greater_than_or_equal`, `equals`, `not_equals`.
+- **Response Header**: `exists`, `not_exists`, `equals`, `not_equals`, `contains`, `not_contains`.
+- **Response Body Text**: `contains`, `not_contains`, `equals`, `not_equals`.
+- **JSON Path**: `exists`, `not_exists`, `equals`, `not_equals`, `contains`, `not_contains`, `less_than`, `greater_than`, `less_than_or_equal`, `greater_than_or_equal`.
+
+### 4. Creating Assertions
+1. Switch to the **Tests** tab in the main request configuration editor.
+2. Click **+ Add Assertion** to open the interactive Assertion Builder card.
+3. Select an assertion type from the category dropdown.
+4. If testing headers or JSON paths, enter the target property name (e.g., `Content-Type` or `data.users[0].id`).
+5. Select a comparison operator from the operator dropdown.
+6. Enter the expected target value. The builder auto-detects numbers, booleans, and null, or honors explicit type overrides.
+7. Click **Add to Request** (or **Update Assertion** when editing).
+8. Assertions appear in the table with category badges, property paths, and action controls:
+   - Checkbox: Quickly toggle assertions enabled or disabled without deletion.
+   - Edit icon: Load an assertion back into the builder for modification.
+   - Delete icon: Remove an individual assertion.
+   - Clear All button: Empty all assertions from the active request.
+
+### 5. Executing Assertions
+When the user clicks **Send**:
+1. Active request state and enabled assertions are packaged into the execution payload.
+2. The outbound HTTP request executes securely via the backend execution engine.
+3. Upon receiving the response, enabled assertions are evaluated against the response status, latency, headers, and body.
+4. Evaluation runs safely in-memory without altering or mutating the underlying response object.
+5. If no assertions are configured or all assertions are disabled, evaluation is safely bypassed.
+
+### 6. Understanding Test Results
+The **Test Results** panel in the response inspector displays comprehensive diagnostics:
+- **PASS**: The assertion condition was fully satisfied by the response.
+- **FAIL**: The assertion condition was violated (e.g., expected 200, received 404).
+- **Unevaluated**: No assertions were configured or all assertions were disabled.
+- **Evaluation Error**: A malformed assertion or unsupported payload structure was encountered; fault isolation guarantees that individual errors never abort the remaining evaluation suite.
+- **HTTP Execution Error**: A network or transport failure occurred (e.g., `ECONNREFUSED` or timeout); assertions are not evaluated because no response was received.
+- **HTTP Success vs. Assertion Failure**: An HTTP 200 OK response can still have failed assertions. The HTTP status code represents the upstream server's transport outcome, whereas assertions represent client-defined business rules. If an upstream endpoint returns HTTP 200 with `{"status": "error"}`, an assertion expecting `status === "success"` will fail. DevProbe guarantees that assertion failures never mutate HTTP status codes or turn successful network responses into errors.
+
+### 7. Saved Request Integration
+- **Persistence**: Configured assertions are automatically serialized into `saved_requests.assertions` JSON column upon saving or updating requests.
+- **Workspace Restoration**: Opening a saved request loads its complete assertion suite into the workspace editor with deep cloning, ensuring clean state separation.
+- **Workspace Isolation**: Creating a new request or switching between requests resets assertion state without cross-request leakage.
+
+### 8. History Integration
+- **Automated Recording**: Every execution records its evaluated test results into MySQL `request_history.test_results` via a fire-and-forget flow.
+- **Historical Immutability**: Inspecting past executions via the History Detail Modal renders the exact recorded test results snapshot without re-running assertions against current state.
+- **Backward Compatibility**: Legacy executions lacking test results display a clean informational empty state without runtime errors.
+
+### 9. Security
+- **Strictly Declarative**: Prohibits `eval()`, `Function()`, and dynamic code interpretation, eliminating script injection risks.
+- **Prototype-Pollution Protection**: JSON path parsers strictly reject forbidden properties (`__proto__`, `constructor`, `prototype`).
+- **Credential Redaction**: Sensitive headers (`Authorization`, `Cookie`, `Set-Cookie`, `x-api-key`) and sensitive JSON paths (`password`, `access_token`, `client_secret`) are masked with `[REDACTED]` in actual/expected fields and diagnostic messages.
+- **Sensitive Target Restrictions**: Sensitive headers and JSON properties are restricted to existence checks (`exists`, `not_exists`), preventing accidental leakages via value matching.
+- **Safe HTML Escaping**: All rendered strings, values, and diagnostic messages are sanitized with `escapeHtml()` prior to DOM insertion.
+
+### 10. Database Changes
+- **`saved_requests.assertions` JSON NULL**: Stores array of declarative assertion definitions attached to saved requests.
+- **`request_history.test_results` JSON NULL**: Stores structured evaluation summaries (`summary` and `results`) with historical execution records.
+- **Idempotent Migrations**: `database/init.js` and `database/schema.sql` automatically verify and apply columns idempotently without data loss.
+
+### 11. Testing Instructions
+Execute the verification test suites using standard npm or node commands:
+```powershell
+# Day 14 Automated Assertion & Testing Verification Suite (183 tests)
+node test-day14.js
+
+# Day 13 History & Comparison Suite (274 tests)
+node test-day13.js
+
+# Full Regression Suite (Days 3-12 — 754 tests)
+npm test
+```
+
+### 12. Example Assertion
+A declarative status code assertion definition:
+```json
+{
+  "id": "assert_status_1",
+  "type": "status_code",
+  "property": null,
+  "operator": "equals",
+  "expected": 200,
+  "enabled": true
+}
+```
+
 ### Database Troubleshooting
 
 | Error Code | Meaning | Solution |
@@ -765,7 +915,8 @@ npm run test:day13   # Day 13: Request execution history & response comparison (
 | Day 11 | Saved request & collection management (edit, delete, disassociation, modals) | Completed |
 | Day 12 | Environment management & dynamic variable resolution (AES-256-GCM, modals) | Completed |
 | Day 13 | Request execution history, audit trail & side-by-side response comparison | Completed |
-| Days 14–16 | User authentication, private workspaces, automated testing, documentation generator, & final deployment | Planned |
+| Day 14 | Automated API response testing & assertion evaluation engine | Completed |
+| Days 15–16 | User authentication, private workspaces, documentation generator, & final deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -774,4 +925,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 13 complete. Request execution history persistence, audit trail, and side-by-side response comparison engine fully implemented with relational MySQL storage (`request_history`), non-blocking fire-and-forget execution recording, multi-tier sensitive credential sanitization and redaction, 64 KB response-body storage cap with truncation flag, RESTful History API (`GET`/`DELETE /api/history`, `GET`/`DELETE /api/history/:id`), dynamic History sidebar with pagination, History Detail inspection modal, workspace loading, single and clear-all deletion, and side-by-side Response Comparison with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards. All 1,028 automated tests (754 regression + 274 Day 13) passing with zero regressions.
+**In Active Development** — Day 14 complete. Automated API response testing, declarative assertion evaluation engine, Assertion Builder UI, real-time response inspector results panel, and non-blocking MySQL test result persistence fully implemented. Comprehensive verification confirmed across status codes, latencies, response headers, body text, and nested JSON paths with strict credential redaction (`[REDACTED]`), prototype-pollution prevention, and workspace isolation. All 1,211 automated tests (754 regression + 274 Day 13 + 183 Day 14) passing with 100% pass rate and zero regressions.

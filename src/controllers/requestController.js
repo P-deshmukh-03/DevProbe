@@ -15,11 +15,12 @@ const historyService = require('../services/historyService');
  * @param {object} requestData - Executed request metadata
  * @param {object|null} responseData - Upstream response data (if successful)
  * @param {Error|object|string|null} errorData - Upstream execution error (if failed)
+ * @param {object|null} [testResults] - Evaluated assertion test results (if available)
  * @returns {Promise<any>|null} The underlying record execution promise (for tests tracking completion)
  */
-function recordHistorySafely(requestData, responseData, errorData) {
+function recordHistorySafely(requestData, responseData, errorData, testResults = null) {
   try {
-    const recordPromise = historyService.recordExecution(requestData, responseData, errorData);
+    const recordPromise = historyService.recordExecution(requestData, responseData, errorData, testResults);
     if (recordPromise && typeof recordPromise.catch === 'function') {
       recordPromise.catch((err) => {
         // Safe, sanitized warning without leaking database credentials or unhandled rejections
@@ -63,13 +64,15 @@ function validateRequest(req, res, next) {
  */
 async function executeRequest(req, res, next) {
   const validatedRequest = req.validatedRequest;
+  const rawAssertions = validatedRequest?.assertions || req.body?.assertions || null;
   const requestData = {
     name: validatedRequest?.name || req.body?.name || req.body?.request_name || null,
     method: validatedRequest.method,
     url: validatedRequest.url,
     headers: validatedRequest.headers,
     body: validatedRequest.body,
-    auth: validatedRequest.auth
+    auth: validatedRequest.auth,
+    assertions: rawAssertions
   };
 
   let executionResult;
@@ -77,12 +80,32 @@ async function executeRequest(req, res, next) {
     executionResult = await requestService.executeRequest(validatedRequest);
   } catch (err) {
     // Fire-and-forget: record execution failure without awaiting or altering upstream error
-    recordHistorySafely(requestData, null, err);
+    recordHistorySafely(requestData, null, err, null);
     return next(err);
   }
 
+  // Evaluate assertions if enabled assertions are configured
+  let testResults = null;
+  const enabledAssertions = Array.isArray(rawAssertions)
+    ? rawAssertions.filter((a) => a && a.enabled !== false)
+    : [];
+
+  if (enabledAssertions.length > 0) {
+    try {
+      const assertionEngine = require('../../public/js/assertionEngine');
+      testResults = assertionEngine.evaluateAssertions(rawAssertions, executionResult);
+    } catch (evalErr) {
+      console.warn(`[Assertion Warning] Failed to evaluate assertions: ${evalErr.message}`);
+    }
+  }
+
   // Fire-and-forget: record successful execution without awaiting or altering 200 response
-  recordHistorySafely(requestData, executionResult, null);
+  recordHistorySafely(requestData, executionResult, null, testResults);
+
+  // Attach test_results to response data if evaluated
+  if (testResults !== null) {
+    executionResult.test_results = testResults;
+  }
 
   return res.status(200).json({
     success: true,

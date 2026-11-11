@@ -787,6 +787,9 @@ async function runTests() {
 
     delete process.env.DEVPROBE_ALLOW_LOCAL_TARGETS;
 
+    // Allow asynchronous history recordings from TEST J to settle before clearing
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
     // =========================================================================
     // TEST K: History REST API Endpoints (Step 4)
     // =========================================================================

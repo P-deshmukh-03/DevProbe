@@ -205,6 +205,7 @@ function validateRequestPayload(req, res, next) {
 
   // Attach normalized validated data to request object
   req.validatedRequest = {
+    name: payload.name || payload.request_name || null,
     method: normalizedMethod,
     url: urlValidation.parsedUrl.href,
     parsedUrl: urlValidation.parsedUrl,
@@ -216,7 +217,8 @@ function validateRequestPayload(req, res, next) {
       mediaType
     },
     auth: payload.auth ?? null,
-    settings: validatedSettings
+    settings: validatedSettings,
+    assertions: Array.isArray(payload.assertions) ? payload.assertions : null
   };
 
   next();

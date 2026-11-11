@@ -271,11 +271,13 @@ function resolveEntireRequest(req, envKey = 'none') {
   return {
     isValid: true,
     executionPayload: {
+      name: req.name || null,
       method: req.method,
       url: preparedUrl.url,
       headers: resolvedHeaders,
       body: resolvedBody,
-      auth: resolvedAuth
+      auth: resolvedAuth,
+      assertions: Array.isArray(req.assertions) ? req.assertions : []
     }
   };
 }
@@ -311,7 +313,8 @@ const activeRequest = {
     basicUsername: '',
     basicPassword: ''
   },
-  selectedEnvironment: 'none'
+  selectedEnvironment: 'none',
+  assertions: []
 };
 
 /**
@@ -330,7 +333,8 @@ const SAMPLE_REQUEST_TEMPLATES = {
       { id: 'h-2', key: 'User-Agent', value: 'DevProbe/1.0', description: 'Client identifier', enabled: true }
     ],
     body: { type: 'none', text: '' },
-    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' },
+    assertions: []
   },
   'req-2': {
     name: 'Create New Post',
@@ -347,7 +351,8 @@ const SAMPLE_REQUEST_TEMPLATES = {
       type: 'json',
       text: '{\n  "title": "foo",\n  "body": "bar",\n  "userId": 1\n}'
     },
-    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' },
+    assertions: []
   },
   'req-3': {
     name: 'Remove Item',
@@ -360,7 +365,8 @@ const SAMPLE_REQUEST_TEMPLATES = {
       { id: 'h-1', key: 'Accept', value: 'application/json', description: 'Expected response format', enabled: true }
     ],
     body: { type: 'none', text: '' },
-    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' },
+    assertions: []
   },
   'hist-1': {
     name: 'Get Users List',
@@ -845,6 +851,11 @@ function loadRequestIntoState(template) {
       }
     : { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' };
 
+  // Deep copy assertions to isolate request assertion states
+  activeRequest.assertions = Array.isArray(template.assertions)
+    ? template.assertions.map((a) => ({ ...a }))
+    : [];
+
   // Render state to DOM
   renderActiveRequestToUI();
 }
@@ -888,7 +899,12 @@ function renderActiveRequestToUI() {
   // 6. Auth controls
   renderAuthControls();
 
-  // 7. Update Live URL Preview
+  // 7. Render Assertions / Tests (Day 14)
+  if (typeof renderAssertions === 'function') {
+    renderAssertions();
+  }
+
+  // 8. Update Live URL Preview
   updateUrlPreview();
 }
 
@@ -1255,7 +1271,10 @@ if (typeof document !== 'undefined') {
   // 11. Request History & Execution Management (Day 13)
   initHistoryManagement();
 
-  // 12. Initial state render
+  // 12. Assertion Builder UI (Day 14)
+  initAssertionBuilder();
+
+  // 13. Initial state render
   renderActiveRequestToUI();
   });
 
@@ -1686,7 +1705,8 @@ const activeResponse = {
   isBinary: false,
   isMalformedJson: false,
   isEmpty: false,
-  format: 'pretty' // 'pretty' | 'raw'
+  format: 'pretty', // 'pretty' | 'raw'
+  test_results: null
 };
 
 /**
@@ -2234,6 +2254,8 @@ function resetResponseViewer() {
       btn.classList.remove('active');
     }
   });
+
+  resetTestResultsViewer();
 }
 
 /**
@@ -2358,6 +2380,9 @@ function renderResponseToUI(responseData) {
 
   // 7. Response Cookies panel
   renderResponseCookiesPanel();
+
+  // 8. Evaluate and Render Test Results (Day 14 Step 5)
+  evaluateAndRenderTestResults(responseData);
 }
 
 /**
@@ -2466,6 +2491,7 @@ function renderResponseError(message, code = 'ERROR') {
   if (headersCount) headersCount.textContent = '0';
 
   renderResponseHeadersPanel();
+  renderTestResultsError(message, code);
 }
 
 /**
@@ -2626,7 +2652,8 @@ function initActionButtons() {
         { id: generateRowId('hdr'), key: 'Accept', value: 'application/json', description: 'Expected response format', enabled: true }
       ],
       body: { type: 'none', text: '' },
-      auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+      auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' },
+      assertions: []
     });
     resetResponseViewer();
     showToast('New Request Tab', 'Reset workspace editor for a new request.', 'info');
@@ -2971,7 +2998,10 @@ function convertSavedRequestToTemplate(savedReq) {
       bearerToken: '',
       basicUsername: '',
       basicPassword: ''
-    }
+    },
+    assertions: Array.isArray(savedReq.assertions)
+      ? savedReq.assertions.map((a) => ({ ...a }))
+      : []
   };
 }
 
@@ -3365,7 +3395,8 @@ function initPersistentCollections() {
         params: Array.isArray(activeRequest.params) ? activeRequest.params : [],
         body: activeRequest.body ? activeRequest.body.text : '',
         body_type: activeRequest.body ? activeRequest.body.type : 'none',
-        auth_type: activeRequest.auth ? activeRequest.auth.type : 'none'
+        auth_type: activeRequest.auth ? activeRequest.auth.type : 'none',
+        assertions: Array.isArray(activeRequest.assertions) ? activeRequest.assertions : []
       };
 
       try {
@@ -3444,6 +3475,7 @@ function initPersistentCollections() {
       let body = existingReq?.body || '';
       let body_type = existingReq?.body_type || 'none';
       let auth_type = existingReq?.auth_type || 'none';
+      let assertions = existingReq?.assertions || [];
 
       // If user opted to update with current active workspace configuration
       if (checkSyncActiveConfig?.checked) {
@@ -3452,6 +3484,7 @@ function initPersistentCollections() {
         body = activeRequest.body ? activeRequest.body.text : '';
         body_type = activeRequest.body ? activeRequest.body.type : 'none';
         auth_type = activeRequest.auth ? activeRequest.auth.type : 'none';
+        assertions = Array.isArray(activeRequest.assertions) ? activeRequest.assertions : [];
       }
 
       const payload = {
@@ -3463,7 +3496,8 @@ function initPersistentCollections() {
         params,
         body,
         body_type,
-        auth_type
+        auth_type,
+        assertions
       };
 
       try {
@@ -4496,6 +4530,9 @@ async function openHistoryDetailModal(id) {
       }
     }
 
+    // Populate Historical Test Results (Day 14 Step 5)
+    renderHistoricalTestResults(rec);
+
     // Reset tabs to Request tab
     switchHistoryDetailTab('hist-view-request');
 
@@ -4598,7 +4635,8 @@ function loadHistoryIntoWorkspace(record = selectedHistoryRecord) {
     params,
     headers,
     body: { type: bodyType, text: bodyText },
-    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' }
+    auth: { type: 'none', bearerToken: '', basicUsername: '', basicPassword: '' },
+    assertions: []
   });
 
   closeHistoryDetailModal();
@@ -5514,6 +5552,1176 @@ function initHistoryComparison() {
 }
 
 /* ==========================================================================
+   12. Assertion Builder & Automated Testing Management (Day 14)
+   ========================================================================== */
+
+/**
+ * Supported operators per assertion category for the UI builder
+ */
+const ASSERTION_OPERATORS_BY_TYPE = {
+  status_code: [
+    { value: 'equals', label: 'equals (==)' },
+    { value: 'not_equals', label: 'not equals (!=)' },
+    { value: 'less_than', label: 'less than (<)' },
+    { value: 'greater_than', label: 'greater than (>)' },
+    { value: 'less_than_or_equal', label: 'less than or equal (<=)' },
+    { value: 'greater_than_or_equal', label: 'greater than or equal (>=)' }
+  ],
+  response_time: [
+    { value: 'less_than', label: 'less than (<)' },
+    { value: 'greater_than', label: 'greater than (>)' },
+    { value: 'less_than_or_equal', label: 'less than or equal (<=)' },
+    { value: 'greater_than_or_equal', label: 'greater than or equal (>=)' },
+    { value: 'equals', label: 'equals (==)' },
+    { value: 'not_equals', label: 'not equals (!=)' }
+  ],
+  header: [
+    { value: 'equals', label: 'equals' },
+    { value: 'not_equals', label: 'not equals' },
+    { value: 'contains', label: 'contains' },
+    { value: 'not_contains', label: 'does not contain' },
+    { value: 'exists', label: 'exists' },
+    { value: 'not_exists', label: 'does not exist' }
+  ],
+  body_text: [
+    { value: 'contains', label: 'contains' },
+    { value: 'not_contains', label: 'does not contain' },
+    { value: 'equals', label: 'equals' },
+    { value: 'not_equals', label: 'not equals' }
+  ],
+  json_path: [
+    { value: 'equals', label: 'equals (==)' },
+    { value: 'not_equals', label: 'not equals (!=)' },
+    { value: 'contains', label: 'contains' },
+    { value: 'not_contains', label: 'does not contain' },
+    { value: 'greater_than', label: 'greater than (>)' },
+    { value: 'less_than', label: 'less than (<)' },
+    { value: 'less_than_or_equal', label: 'less than or equal (<=)' },
+    { value: 'greater_than_or_equal', label: 'greater than or equal (>=)' },
+    { value: 'exists', label: 'exists' },
+    { value: 'not_exists', label: 'does not exist' }
+  ]
+};
+
+const SENSITIVE_OPERATORS_ONLY = [
+  { value: 'exists', label: 'exists' },
+  { value: 'not_exists', label: 'does not exist' }
+];
+
+const SENSITIVE_HEADERS_SET = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'api-key',
+  'apikey',
+  'x-auth-token',
+  'auth-token',
+  'session-token',
+  'x-session-id'
+]);
+
+const PURE_SECRET_PROP_REGEX = /(^|\.)(password|passwd|pwd|private_key|secret|client_secret|secret_key|api_key|apikey|token|access_token|refresh_token)$/i;
+const PROTOTYPE_POLLUTION_REGEX = /(__proto__|prototype|constructor)/i;
+const RFC_7230_HEADER_REGEX = /^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$/;
+const JSON_PATH_SYNTAX_REGEX = /^([a-zA-Z_$][a-zA-Z0-9_$]*|\[\d+\])(\.[a-zA-Z_$][a-zA-Z0-9_$]*|\[\d+\])*$/;
+
+/**
+ * Checks if a header name is considered sensitive credentials.
+ */
+function isSensitiveHeaderName(headerName) {
+  if (!headerName || typeof headerName !== 'string') return false;
+  return SENSITIVE_HEADERS_SET.has(headerName.trim().toLowerCase());
+}
+
+/**
+ * Checks if a property or JSON path targets sensitive credentials.
+ */
+function isSensitivePropertyName(propPath) {
+  if (!propPath || typeof propPath !== 'string') return false;
+  const normalized = propPath.replace(/\[\s*['"]?([a-zA-Z0-9_$]+)['"]?\s*\]/g, '.$1');
+  return PURE_SECRET_PROP_REGEX.test(normalized);
+}
+
+/**
+ * Generates a unique, collision-resistant assertion ID.
+ */
+function generateAssertionId(type = 'assertion') {
+  const safeType = String(type || 'assertion').toLowerCase().replace(/[^a-z0-9_]/g, '');
+  const timestamp = Date.now();
+  const randomPart = Math.random().toString(36).substring(2, 8);
+  return `assert_${safeType}_${timestamp}_${randomPart}`;
+}
+
+/**
+ * Updates the Tests tab badge counter with the count of active/enabled assertions.
+ */
+function updateTestsCount() {
+  if (typeof document === 'undefined') return;
+  const countBadge = document.getElementById('tests-count');
+  if (!countBadge) return;
+  const count = (activeRequest.assertions || []).filter(a => a && a.enabled !== false).length;
+  countBadge.textContent = count.toString();
+}
+
+/**
+ * Safely parses the raw expected value string according to type and operator.
+ */
+function parseExpectedValue(type, rawVal, explicitType = 'auto', operator = '') {
+  if (operator === 'exists' || operator === 'not_exists') {
+    return null;
+  }
+
+  if (type === 'status_code') {
+    const parsed = parseInt(rawVal, 10);
+    return isNaN(parsed) ? rawVal : parsed;
+  }
+
+  if (type === 'response_time') {
+    const num = Number(rawVal);
+    return isNaN(num) ? rawVal : num;
+  }
+
+  const str = typeof rawVal === 'string' ? rawVal : String(rawVal != null ? rawVal : '');
+  const trimmed = str.trim();
+
+  if (explicitType === 'number') {
+    const num = Number(trimmed);
+    return isNaN(num) ? trimmed : num;
+  }
+  if (explicitType === 'boolean') {
+    return trimmed.toLowerCase() === 'true';
+  }
+  if (explicitType === 'null') {
+    return null;
+  }
+  if (explicitType === 'string') {
+    return trimmed;
+  }
+
+  // Auto-detect mode
+  if (trimmed.toLowerCase() === 'true') return true;
+  if (trimmed.toLowerCase() === 'false') return false;
+  if (trimmed.toLowerCase() === 'null') return null;
+
+  // Check if quoted string e.g. "foo" or 'foo'
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2)) {
+    return trimmed.slice(1, -1);
+  }
+
+  // Check if pure numeric
+  if (trimmed !== '' && !isNaN(Number(trimmed)) && !trimmed.includes(' ') && !/^\s*0[0-9]+/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  return trimmed;
+}
+
+/**
+ * Formats assertion category for display badge
+ */
+function formatAssertionTypeBadge(type) {
+  switch (type) {
+    case 'status_code': return 'Status Code';
+    case 'response_time': return 'Latency';
+    case 'header': return 'Header';
+    case 'body_text': return 'Body Text';
+    case 'json_path': return 'JSON Path';
+    default: return type || 'Assertion';
+  }
+}
+
+/**
+ * Formats expected value for display in the table
+ */
+function formatExpectedForDisplay(val) {
+  if (val === null) return 'null';
+  if (val === undefined) return 'undefined';
+  if (typeof val === 'string') return `"${val}"`;
+  return String(val);
+}
+
+/**
+ * Updates builder form fields dynamically based on the selected assertion category
+ */
+function updateAssertionFormForType() {
+  if (typeof document === 'undefined') return;
+
+  const typeSelect = document.getElementById('assert-type-select');
+  const propGroup = document.getElementById('assert-property-group');
+  const propLabel = document.getElementById('assert-property-label');
+  const propInput = document.getElementById('assert-property-input');
+  const propHint = document.getElementById('assert-property-hint');
+  const opSelect = document.getElementById('assert-operator-select');
+  const expectedGroup = document.getElementById('assert-expected-group');
+  const expectedInput = document.getElementById('assert-expected-input');
+  const expectedHint = document.getElementById('assert-expected-hint');
+  const expectedType = document.getElementById('assert-expected-type');
+
+  if (!typeSelect || !opSelect) return;
+
+  const type = typeSelect.value || 'status_code';
+
+  // 1. Property group visibility & labels
+  if (type === 'header') {
+    if (propGroup) propGroup.classList.remove('hidden');
+    if (propLabel) propLabel.textContent = 'Header Name';
+    if (propInput) propInput.placeholder = 'e.g. Content-Type';
+    if (propHint) propHint.textContent = 'Standard HTTP response header name';
+    if (expectedHint) expectedHint.textContent = 'Expected header value (case-insensitive substring/equality)';
+    if (expectedType) expectedType.classList.add('hidden');
+  } else if (type === 'json_path') {
+    if (propGroup) propGroup.classList.remove('hidden');
+    if (propLabel) propLabel.textContent = 'JSON Path';
+    if (propInput) propInput.placeholder = 'e.g. user.id or items[0].name';
+    if (propHint) propHint.textContent = 'Dot and bracket notation (e.g. status, user.name, items[0].id)';
+    if (expectedHint) expectedHint.textContent = 'Expected value (string, number, boolean, null)';
+    if (expectedType) expectedType.classList.remove('hidden');
+  } else {
+    if (propGroup) propGroup.classList.add('hidden');
+    if (propInput) propInput.value = '';
+    if (expectedType) expectedType.classList.add('hidden');
+
+    if (type === 'status_code') {
+      if (expectedHint) expectedHint.textContent = 'Expected HTTP status code (100–599)';
+      if (expectedInput && !expectedInput.value) expectedInput.value = '200';
+    } else if (type === 'response_time') {
+      if (expectedHint) expectedHint.textContent = 'Maximum latency in milliseconds (ms)';
+      if (expectedInput && !expectedInput.value) expectedInput.value = '500';
+    } else if (type === 'body_text') {
+      if (expectedHint) expectedHint.textContent = 'Text to search in raw response body';
+    }
+  }
+
+  // 2. Check sensitivity to populate operator select
+  checkPropertySensitivity();
+}
+
+/**
+ * Checks sensitivity for the current property input and updates operator options accordingly
+ */
+function checkPropertySensitivity() {
+  if (typeof document === 'undefined') return;
+
+  const typeSelect = document.getElementById('assert-type-select');
+  const propInput = document.getElementById('assert-property-input');
+  const opSelect = document.getElementById('assert-operator-select');
+  const securityNotice = document.getElementById('assert-security-notice');
+  const noticeText = document.getElementById('assert-security-notice-text');
+
+  if (!typeSelect || !opSelect) return;
+
+  const type = typeSelect.value;
+  const propVal = propInput ? propInput.value.trim() : '';
+
+  let isSensitive = false;
+  if (type === 'header' && isSensitiveHeaderName(propVal)) {
+    isSensitive = true;
+    if (noticeText) {
+      noticeText.textContent = `Header "${propVal}" contains sensitive authentication credentials. Matching is restricted to existence checks.`;
+    }
+  } else if (type === 'json_path' && isSensitivePropertyName(propVal)) {
+    isSensitive = true;
+    if (noticeText) {
+      noticeText.textContent = `Property "${propVal}" targets sensitive credentials. Matching is restricted to existence checks.`;
+    }
+  }
+
+  const currentOp = opSelect.value;
+  opSelect.innerHTML = '';
+
+  const opList = isSensitive
+    ? SENSITIVE_OPERATORS_ONLY
+    : (ASSERTION_OPERATORS_BY_TYPE[type] || []);
+
+  opList.forEach((op) => {
+    const opt = document.createElement('option');
+    opt.value = op.value;
+    opt.textContent = op.label;
+    opSelect.appendChild(opt);
+  });
+
+  if (opList.some((op) => op.value === currentOp)) {
+    opSelect.value = currentOp;
+  } else if (opList.length > 0) {
+    opSelect.value = opList[0].value;
+  }
+
+  if (securityNotice) {
+    if (isSensitive) {
+      securityNotice.classList.remove('hidden');
+    } else {
+      securityNotice.classList.add('hidden');
+    }
+  }
+
+  checkExpectedVisibility();
+}
+
+/**
+ * Toggles visibility of the expected value input group based on current operator and sensitivity
+ */
+function checkExpectedVisibility() {
+  if (typeof document === 'undefined') return;
+
+  const opSelect = document.getElementById('assert-operator-select');
+  const expectedGroup = document.getElementById('assert-expected-group');
+
+  if (!opSelect || !expectedGroup) return;
+
+  const op = opSelect.value;
+  if (op === 'exists' || op === 'not_exists') {
+    expectedGroup.classList.add('hidden');
+  } else {
+    expectedGroup.classList.remove('hidden');
+  }
+}
+
+/**
+ * Displays validation error inside the assertion builder card
+ */
+function showAssertionBuilderError(message) {
+  if (typeof document === 'undefined') return;
+  const errorEl = document.getElementById('assertion-builder-error');
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+/**
+ * Hides validation error in the builder card
+ */
+function hideAssertionBuilderError() {
+  if (typeof document === 'undefined') return;
+  const errorEl = document.getElementById('assertion-builder-error');
+  if (errorEl) {
+    errorEl.textContent = '';
+    errorEl.classList.add('hidden');
+  }
+}
+
+/**
+ * Opens the Assertion Builder form card in either create or edit mode
+ */
+function openAssertionBuilder(assertionId = null) {
+  if (typeof document === 'undefined') return;
+
+  hideAssertionBuilderError();
+
+  const card = document.getElementById('assertion-builder-card');
+  const title = document.getElementById('assertion-builder-title');
+  const editIdInput = document.getElementById('assert-edit-id');
+  const typeSelect = document.getElementById('assert-type-select');
+  const propInput = document.getElementById('assert-property-input');
+  const opSelect = document.getElementById('assert-operator-select');
+  const expectedInput = document.getElementById('assert-expected-input');
+  const expectedType = document.getElementById('assert-expected-type');
+
+  if (!card) return;
+
+  if (assertionId) {
+    // Edit mode
+    const assertion = (activeRequest.assertions || []).find((a) => a && a.id === assertionId);
+    if (!assertion) return;
+
+    if (title) title.textContent = 'Edit Assertion';
+    if (editIdInput) editIdInput.value = assertion.id;
+    if (typeSelect) typeSelect.value = assertion.type;
+
+    updateAssertionFormForType();
+
+    if (propInput) propInput.value = assertion.property || '';
+    checkPropertySensitivity();
+
+    if (opSelect) opSelect.value = assertion.operator;
+    checkExpectedVisibility();
+
+    if (expectedInput) {
+      if (assertion.expected === null || assertion.expected === undefined) {
+        expectedInput.value = '';
+      } else {
+        expectedInput.value = String(assertion.expected);
+      }
+    }
+
+    if (expectedType) {
+      if (typeof assertion.expected === 'number') expectedType.value = 'number';
+      else if (typeof assertion.expected === 'boolean') expectedType.value = 'boolean';
+      else if (assertion.expected === null) expectedType.value = 'null';
+      else if (typeof assertion.expected === 'string') expectedType.value = 'string';
+      else expectedType.value = 'auto';
+    }
+  } else {
+    // Create new mode
+    if (title) title.textContent = 'New Assertion';
+    if (editIdInput) editIdInput.value = '';
+    if (typeSelect) typeSelect.value = 'status_code';
+
+    updateAssertionFormForType();
+
+    if (propInput) propInput.value = '';
+    if (opSelect) opSelect.value = 'equals';
+    if (expectedInput) expectedInput.value = '200';
+    if (expectedType) expectedType.value = 'auto';
+
+    checkExpectedVisibility();
+  }
+
+  card.classList.remove('hidden');
+
+  // Focus appropriate input
+  if (propInput && !propInput.parentElement.classList.contains('hidden')) {
+    propInput.focus();
+  } else if (expectedInput && !expectedInput.parentElement.classList.contains('hidden')) {
+    expectedInput.focus();
+  }
+}
+
+/**
+ * Closes the Assertion Builder form card and resets fields
+ */
+function closeAssertionBuilder() {
+  if (typeof document === 'undefined') return;
+
+  hideAssertionBuilderError();
+
+  const card = document.getElementById('assertion-builder-card');
+  if (card) card.classList.add('hidden');
+
+  const editIdInput = document.getElementById('assert-edit-id');
+  if (editIdInput) editIdInput.value = '';
+
+  const propInput = document.getElementById('assert-property-input');
+  if (propInput) propInput.value = '';
+
+  const expectedInput = document.getElementById('assert-expected-input');
+  if (expectedInput) expectedInput.value = '';
+}
+
+/**
+ * Validates builder inputs and persists assertion to activeRequest.assertions
+ */
+function saveAssertionFromForm() {
+  if (typeof document === 'undefined') return;
+
+  hideAssertionBuilderError();
+
+  const editIdInput = document.getElementById('assert-edit-id');
+  const typeSelect = document.getElementById('assert-type-select');
+  const propInput = document.getElementById('assert-property-input');
+  const opSelect = document.getElementById('assert-operator-select');
+  const expectedInput = document.getElementById('assert-expected-input');
+  const expectedType = document.getElementById('assert-expected-type');
+
+  if (!typeSelect || !opSelect) return;
+
+  const editId = editIdInput ? editIdInput.value.trim() : '';
+  const type = typeSelect.value;
+  const property = propInput ? propInput.value.trim() : '';
+  const operator = opSelect.value;
+  const rawExpected = expectedInput ? expectedInput.value : '';
+  const explicitType = expectedType ? expectedType.value : 'auto';
+
+  // Ensure activeRequest.assertions array exists
+  if (!Array.isArray(activeRequest.assertions)) {
+    activeRequest.assertions = [];
+  }
+
+  // 1. Limit check
+  if (!editId && activeRequest.assertions.length >= 50) {
+    showAssertionBuilderError('Maximum of 50 assertions per request allowed.');
+    return;
+  }
+
+  // 2. Validate category
+  if (!ASSERTION_OPERATORS_BY_TYPE[type]) {
+    showAssertionBuilderError('Invalid assertion category selected.');
+    return;
+  }
+
+  // 3. Category-specific target property validation
+  let targetProperty = null;
+  if (type === 'header') {
+    if (!property) {
+      showAssertionBuilderError('Header name is required.');
+      return;
+    }
+    if (PROTOTYPE_POLLUTION_REGEX.test(property)) {
+      showAssertionBuilderError('Header name contains forbidden prototype property names.');
+      return;
+    }
+    if (!RFC_7230_HEADER_REGEX.test(property)) {
+      showAssertionBuilderError('Invalid header name. Must be a valid RFC 7230 token.');
+      return;
+    }
+    targetProperty = property;
+
+    if (isSensitiveHeaderName(property) && operator !== 'exists' && operator !== 'not_exists') {
+      showAssertionBuilderError('Sensitive headers are restricted to exists and does not exist operators.');
+      return;
+    }
+  } else if (type === 'json_path') {
+    if (!property) {
+      showAssertionBuilderError('JSON path is required.');
+      return;
+    }
+    if (PROTOTYPE_POLLUTION_REGEX.test(property)) {
+      showAssertionBuilderError('JSON path contains forbidden prototype properties (__proto__, prototype, constructor).');
+      return;
+    }
+    if (!JSON_PATH_SYNTAX_REGEX.test(property)) {
+      showAssertionBuilderError('Invalid JSON path syntax. Use dot notation (user.name) or bracket index (items[0]).');
+      return;
+    }
+    targetProperty = property;
+
+    if (isSensitivePropertyName(property) && operator !== 'exists' && operator !== 'not_exists') {
+      showAssertionBuilderError('Sensitive properties are restricted to exists and does not exist operators.');
+      return;
+    }
+  }
+
+  // 4. Operator validation
+  const allowedOps = (isSensitiveHeaderName(property) || isSensitivePropertyName(property))
+    ? SENSITIVE_OPERATORS_ONLY.map(o => o.value)
+    : (ASSERTION_OPERATORS_BY_TYPE[type] || []).map(o => o.value);
+
+  if (!allowedOps.includes(operator)) {
+    showAssertionBuilderError(`Operator "${operator}" is not supported for ${type}.`);
+    return;
+  }
+
+  // 5. Expected value validation & parsing
+  let finalExpected = null;
+  if (operator === 'exists' || operator === 'not_exists') {
+    finalExpected = null;
+  } else {
+    if (rawExpected.trim() === '' && explicitType !== 'string' && type !== 'body_text') {
+      showAssertionBuilderError('Expected value is required.');
+      return;
+    }
+
+    if (type === 'status_code') {
+      const code = parseInt(rawExpected, 10);
+      if (isNaN(code) || code < 100 || code > 599) {
+        showAssertionBuilderError('Status code must be an integer between 100 and 599.');
+        return;
+      }
+      finalExpected = code;
+    } else if (type === 'response_time') {
+      const latency = Number(rawExpected);
+      if (isNaN(latency) || latency < 0) {
+        showAssertionBuilderError('Response latency must be a non-negative number in milliseconds.');
+        return;
+      }
+      finalExpected = latency;
+    } else {
+      // Forbidden script patterns check
+      if (typeof rawExpected === 'string' &&
+          (/\beval\s*\(/i.test(rawExpected) || /\bFunction\s*\(/i.test(rawExpected) || /<\s*script\b/i.test(rawExpected))) {
+        showAssertionBuilderError('Forbidden script or dynamic code pattern detected in expected value.');
+        return;
+      }
+      finalExpected = parseExpectedValue(type, rawExpected, explicitType, operator);
+    }
+  }
+
+  // 6. Build assertion object
+  const assertionData = {
+    id: editId || generateAssertionId(type),
+    type,
+    property: targetProperty,
+    operator,
+    expected: finalExpected,
+    enabled: true
+  };
+
+  // 7. Update state
+  if (editId) {
+    const existingIndex = activeRequest.assertions.findIndex((a) => a && a.id === editId);
+    if (existingIndex !== -1) {
+      assertionData.enabled = activeRequest.assertions[existingIndex].enabled !== false;
+      activeRequest.assertions[existingIndex] = assertionData;
+      showToast('Assertion updated', 'Saved changes to assertion definition.', 'success');
+    } else {
+      activeRequest.assertions.push(assertionData);
+      showToast('Assertion added', 'Added new assertion definition.', 'success');
+    }
+  } else {
+    activeRequest.assertions.push(assertionData);
+    showToast('Assertion added', 'Added new assertion definition.', 'success');
+  }
+
+  // 8. Close builder & render
+  closeAssertionBuilder();
+  renderAssertions();
+}
+
+/**
+ * Removes an assertion definition by its unique ID
+ */
+function deleteAssertion(assertionId) {
+  if (!assertionId) return;
+  activeRequest.assertions = (activeRequest.assertions || []).filter((a) => a && a.id !== assertionId);
+  renderAssertions();
+  showToast('Assertion deleted', 'Removed assertion from request configuration.', 'info');
+}
+
+/**
+ * Toggles an assertion definition's enabled status
+ */
+function toggleAssertionEnabled(assertionId) {
+  if (!assertionId) return;
+  const assertion = (activeRequest.assertions || []).find((a) => a && a.id === assertionId);
+  if (!assertion) return;
+
+  assertion.enabled = !(assertion.enabled !== false);
+  renderAssertions();
+}
+
+/**
+ * Clears all assertions configured for the active request
+ */
+function clearAllAssertions() {
+  if (!activeRequest.assertions || activeRequest.assertions.length === 0) return;
+
+  const proceed = typeof confirm === 'function'
+    ? confirm('Are you sure you want to remove all assertions from this request?')
+    : true;
+
+  if (proceed) {
+    activeRequest.assertions = [];
+    closeAssertionBuilder();
+    renderAssertions();
+    showToast('Assertions cleared', 'All assertions removed from active request.', 'info');
+  }
+}
+
+/**
+ * Renders the assertion list and empty state based on activeRequest.assertions state
+ */
+function renderAssertions() {
+  if (typeof document === 'undefined') return;
+
+  if (!Array.isArray(activeRequest.assertions)) {
+    activeRequest.assertions = [];
+  }
+
+  updateTestsCount();
+
+  const emptyState = document.getElementById('assertions-empty-state');
+  const listContainer = document.getElementById('assertions-list-container');
+  const btnClearAll = document.getElementById('btn-clear-all-assertions');
+  const tbody = document.getElementById('assertions-tbody');
+
+  if (!emptyState || !listContainer || !tbody) return;
+
+  if (activeRequest.assertions.length === 0) {
+    emptyState.classList.remove('hidden');
+    listContainer.classList.add('hidden');
+    if (btnClearAll) btnClearAll.classList.add('hidden');
+    tbody.innerHTML = '';
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  listContainer.classList.remove('hidden');
+  if (btnClearAll) btnClearAll.classList.remove('hidden');
+
+  tbody.innerHTML = '';
+
+  activeRequest.assertions.forEach((assertion) => {
+    if (!assertion || !assertion.id) return;
+
+    const tr = document.createElement('tr');
+    tr.className = `assertion-row ${assertion.enabled === false ? 'assertion-row-disabled' : ''}`;
+    tr.setAttribute('data-id', assertion.id);
+
+    // 1. Checkbox for enabled state
+    const tdCheck = document.createElement('td');
+    tdCheck.className = 'col-check';
+    const checkLabel = document.createElement('label');
+    checkLabel.className = 'cell-checkbox';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'assert-checkbox';
+    checkbox.setAttribute('data-id', assertion.id);
+    checkbox.checked = assertion.enabled !== false;
+    checkbox.setAttribute('aria-label', `Toggle assertion ${assertion.id}`);
+    checkLabel.appendChild(checkbox);
+    tdCheck.appendChild(checkLabel);
+    tr.appendChild(tdCheck);
+
+    // 2. Category badge
+    const tdType = document.createElement('td');
+    tdType.className = 'col-assert-type';
+    const badge = document.createElement('span');
+    badge.className = `assert-badge assert-type-${assertion.type || 'status_code'}`;
+    badge.textContent = formatAssertionTypeBadge(assertion.type);
+    tdType.appendChild(badge);
+    tr.appendChild(tdType);
+
+    // 3. Target / Property
+    const tdProp = document.createElement('td');
+    tdProp.className = 'col-assert-prop';
+    if (assertion.property) {
+      const code = document.createElement('code');
+      code.textContent = assertion.property;
+      tdProp.appendChild(code);
+    } else {
+      const emptySpan = document.createElement('span');
+      emptySpan.className = 'text-muted';
+      emptySpan.textContent = '—';
+      tdProp.appendChild(emptySpan);
+    }
+    tr.appendChild(tdProp);
+
+    // 4. Operator pill
+    const tdOp = document.createElement('td');
+    tdOp.className = 'col-assert-op';
+    const opPill = document.createElement('span');
+    opPill.className = 'assert-op-pill';
+    opPill.textContent = assertion.operator || 'equals';
+    tdOp.appendChild(opPill);
+    tr.appendChild(tdOp);
+
+    // 5. Expected value
+    const tdVal = document.createElement('td');
+    tdVal.className = 'col-assert-val';
+    if (assertion.operator === 'exists' || assertion.operator === 'not_exists') {
+      const notReq = document.createElement('span');
+      notReq.className = 'text-muted';
+      notReq.textContent = '(not required)';
+      tdVal.appendChild(notReq);
+    } else {
+      const valCode = document.createElement('code');
+      valCode.textContent = formatExpectedForDisplay(assertion.expected);
+      tdVal.appendChild(valCode);
+    }
+    tr.appendChild(tdVal);
+
+    // 6. Action buttons (Edit & Delete)
+    const tdActions = document.createElement('td');
+    tdActions.className = 'col-assert-actions';
+
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
+    btnEdit.className = 'btn-icon btn-edit-assertion';
+    btnEdit.setAttribute('data-id', assertion.id);
+    btnEdit.setAttribute('title', 'Edit assertion');
+    btnEdit.setAttribute('aria-label', `Edit assertion ${assertion.id}`);
+    btnEdit.innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+      </svg>
+    `;
+
+    const btnDelete = document.createElement('button');
+    btnDelete.type = 'button';
+    btnDelete.className = 'btn-icon btn-delete-assertion';
+    btnDelete.setAttribute('data-id', assertion.id);
+    btnDelete.setAttribute('title', 'Delete assertion');
+    btnDelete.setAttribute('aria-label', `Delete assertion ${assertion.id}`);
+    btnDelete.innerHTML = `
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    `;
+
+    tdActions.appendChild(btnEdit);
+    tdActions.appendChild(btnDelete);
+    tr.appendChild(tdActions);
+
+    tbody.appendChild(tr);
+  });
+}
+
+/**
+ * Initializes DOM event listeners for the Assertion Builder UI
+ */
+function initAssertionBuilder() {
+  if (typeof document === 'undefined') return;
+
+  const btnOpen = document.getElementById('btn-open-assertion-builder');
+  if (btnOpen) {
+    btnOpen.addEventListener('click', () => openAssertionBuilder());
+  }
+
+  const btnAddFirst = document.getElementById('btn-add-first-assertion');
+  if (btnAddFirst) {
+    btnAddFirst.addEventListener('click', () => openAssertionBuilder());
+  }
+
+  const btnClose = document.getElementById('btn-close-assertion-builder');
+  if (btnClose) {
+    btnClose.addEventListener('click', () => closeAssertionBuilder());
+  }
+
+  const btnCancel = document.getElementById('btn-cancel-assertion');
+  if (btnCancel) {
+    btnCancel.addEventListener('click', () => closeAssertionBuilder());
+  }
+
+  const btnSave = document.getElementById('btn-save-assertion');
+  if (btnSave) {
+    btnSave.addEventListener('click', () => saveAssertionFromForm());
+  }
+
+  const btnClearAll = document.getElementById('btn-clear-all-assertions');
+  if (btnClearAll) {
+    btnClearAll.addEventListener('click', () => clearAllAssertions());
+  }
+
+  const typeSelect = document.getElementById('assert-type-select');
+  if (typeSelect) {
+    typeSelect.addEventListener('change', () => updateAssertionFormForType());
+  }
+
+  const propInput = document.getElementById('assert-property-input');
+  if (propInput) {
+    propInput.addEventListener('input', () => checkPropertySensitivity());
+  }
+
+  const opSelect = document.getElementById('assert-operator-select');
+  if (opSelect) {
+    opSelect.addEventListener('change', () => checkExpectedVisibility());
+  }
+
+  const expectedInput = document.getElementById('assert-expected-input');
+  [propInput, expectedInput].forEach((inputEl) => {
+    if (inputEl) {
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          saveAssertionFromForm();
+        }
+      });
+    }
+  });
+
+  const tbody = document.getElementById('assertions-tbody');
+  if (tbody) {
+    tbody.addEventListener('change', (e) => {
+      const checkbox = e.target.closest('.assert-checkbox');
+      if (checkbox) {
+        const id = checkbox.getAttribute('data-id');
+        if (id) toggleAssertionEnabled(id);
+      }
+    });
+
+    tbody.addEventListener('click', (e) => {
+      const btnEdit = e.target.closest('.btn-edit-assertion');
+      if (btnEdit) {
+        const id = btnEdit.getAttribute('data-id');
+        if (id) openAssertionBuilder(id);
+        return;
+      }
+
+      const btnDel = e.target.closest('.btn-delete-assertion');
+      if (btnDel) {
+        const id = btnDel.getAttribute('data-id');
+        if (id) deleteAssertion(id);
+      }
+    });
+  }
+}
+
+/**
+ * Safely resolves the Assertion Evaluation Engine in both browser and CommonJS contexts.
+ */
+function getAssertionEngine() {
+  if (typeof window !== 'undefined' && window.assertionEngine) {
+    return window.assertionEngine;
+  }
+  if (typeof evaluateAssertions === 'function') {
+    return { evaluateAssertions };
+  }
+  try {
+    return require('./assertionEngine');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safely evaluates active request assertions against the HTTP response
+ * and orchestrates rendering to the Test Results panel.
+ *
+ * @param {object} responseData - Upstream response object
+ * @returns {object|null} Evaluated test results summary or null
+ */
+function evaluateAndRenderTestResults(responseData) {
+  if (typeof document === 'undefined') return null;
+
+  const assertions = activeRequest.assertions || [];
+  const enabledAssertions = assertions.filter((a) => a && a.enabled !== false);
+
+  const emptyState = document.getElementById('res-tests-empty-state');
+  const emptyDesc = document.getElementById('res-tests-empty-desc');
+  const contentEl = document.getElementById('res-tests-content');
+  const countBadge = document.getElementById('res-tests-count');
+  const metricItem = document.getElementById('res-tests-metric');
+  const metricBadge = document.getElementById('res-tests-badge');
+
+  // Case 1: No assertions configured at all
+  if (assertions.length === 0) {
+    if (emptyState) emptyState.classList.remove('hidden');
+    if (emptyDesc) {
+      emptyDesc.textContent = 'No test assertions configured. Add assertions in the Tests tab to automate validation for this request.';
+    }
+    if (contentEl) {
+      contentEl.classList.add('hidden');
+      contentEl.innerHTML = '';
+    }
+    if (countBadge) countBadge.classList.add('hidden');
+    if (metricItem) metricItem.classList.add('hidden');
+    activeResponse.test_results = null;
+    return null;
+  }
+
+  // Case 2: All assertions are disabled
+  if (enabledAssertions.length === 0) {
+    if (emptyState) emptyState.classList.remove('hidden');
+    if (emptyDesc) {
+      emptyDesc.textContent = 'All configured assertions are currently disabled. Enable them in the Tests tab to evaluate response data.';
+    }
+    if (contentEl) {
+      contentEl.classList.add('hidden');
+      contentEl.innerHTML = '';
+    }
+    if (countBadge) countBadge.classList.add('hidden');
+    if (metricItem) metricItem.classList.add('hidden');
+    activeResponse.test_results = null;
+    return null;
+  }
+
+  // Case 3: Evaluate enabled assertions against response
+  let testResults = responseData && responseData.test_results ? responseData.test_results : null;
+
+  if (!testResults) {
+    const engine = getAssertionEngine();
+    if (engine && typeof engine.evaluateAssertions === 'function') {
+      testResults = engine.evaluateAssertions(assertions, responseData);
+    }
+  }
+
+  activeResponse.test_results = testResults;
+
+  if (testResults && testResults.summary) {
+    const { total, passed, status } = testResults.summary;
+
+    // Render results into panel
+    renderTestResultsToUI(testResults, 'res-tests-content');
+
+    // Update Response Inspector Tab Counter
+    if (countBadge) {
+      countBadge.textContent = `${passed}/${total}`;
+      countBadge.className = `tab-counter test-results-counter ${status === 'passed' ? 'badge-success' : 'badge-danger'}`;
+      countBadge.classList.remove('hidden');
+    }
+
+    // Update Response Metrics Badge
+    if (metricItem && metricBadge) {
+      metricBadge.textContent = `${passed}/${total} Passed`;
+      metricBadge.className = `metric-badge ${status === 'passed' ? 'metric-badge-success' : 'metric-badge-danger'}`;
+      metricItem.classList.remove('hidden');
+    }
+  }
+
+  return testResults;
+}
+
+/**
+ * Renders structured test results cards and summary metrics into target container.
+ *
+ * @param {object} testResults - Output from assertion evaluation engine
+ * @param {string} targetContainerId - Target DOM element ID
+ */
+function renderTestResultsToUI(testResults, targetContainerId = 'res-tests-content') {
+  if (typeof document === 'undefined') return;
+  if (!testResults || !testResults.summary) return;
+
+  const container = document.getElementById(targetContainerId);
+  if (!container) return;
+
+  if (targetContainerId === 'res-tests-content') {
+    const emptyState = document.getElementById('res-tests-empty-state');
+    if (emptyState) emptyState.classList.add('hidden');
+    container.classList.remove('hidden');
+  }
+
+  const { total, passed, failed, status } = testResults.summary;
+  const isAllPassed = status === 'passed';
+
+  let html = `
+    <div class="test-results-summary-bar ${isAllPassed ? 'summary-status-passed' : 'summary-status-failed'}">
+      <div class="summary-status-group">
+        <div class="summary-status-icon ${isAllPassed ? 'icon-pass' : 'icon-fail'}">
+          ${isAllPassed
+            ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+            : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'}
+        </div>
+        <span class="summary-status-title">
+          ${isAllPassed ? 'All Assertions Passed' : `Assertions Failed (${passed} of ${total} passed)`}
+        </span>
+      </div>
+      <div class="summary-metrics-group">
+        <span class="metric-chip chip-total">Total: ${total}</span>
+        <span class="metric-chip chip-passed">Passed: ${passed}</span>
+        <span class="metric-chip chip-failed">Failed: ${failed}</span>
+      </div>
+    </div>
+    <div class="test-results-list">
+  `;
+
+  (testResults.results || []).forEach((r) => {
+    if (!r) return;
+    const isPass = r.passed === true;
+    const isExistenceOp = r.operator === 'exists' || r.operator === 'not_exists';
+
+    html += `
+      <div class="test-result-card ${isPass ? 'passed' : 'failed'}">
+        <div class="test-result-card-header">
+          <div class="result-header-left">
+            <span class="result-status-badge ${isPass ? 'status-pass' : 'status-fail'}">
+              ${isPass ? 'PASS' : 'FAIL'}
+            </span>
+            <span class="assert-badge assert-type-${escapeHtml(r.type || 'status_code')}">
+              ${escapeHtml(formatAssertionTypeBadge(r.type))}
+            </span>
+            ${r.property ? `<code class="result-target-code">${escapeHtml(r.property)}</code>` : ''}
+            <span class="assert-op-pill">${escapeHtml(r.operator || 'equals')}</span>
+          </div>
+        </div>
+        <div class="test-result-card-body">
+          <div class="result-compare-row">
+            ${isExistenceOp
+              ? '<div class="result-val-item"><span class="result-val-label">Condition:</span> <span class="text-muted">' + escapeHtml(r.operator) + '</span></div>'
+              : '<div class="result-val-item"><span class="result-val-label">Expected:</span> <code class="result-val-code">' + escapeHtml(formatExpectedForDisplay(r.expected)) + '</code></div>'}
+            ${!isExistenceOp && r.actual !== undefined
+              ? '<div class="result-val-item"><span class="result-val-label">Actual:</span> <code class="result-val-code ' + (isPass ? '' : 'actual-fail') + '">' + escapeHtml(formatExpectedForDisplay(r.actual)) + '</code></div>'
+              : ''}
+          </div>
+          <div class="result-diagnostic-msg ${isPass ? '' : 'has-error'}">
+            ${escapeHtml(r.message || (isPass ? 'Assertion satisfied' : 'Assertion failed'))}
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+/**
+ * Displays request execution errors (transport/network failure) in Test Results panel.
+ *
+ * @param {string} message - Descriptive error message
+ * @param {string} code - Machine-readable error code
+ */
+function renderTestResultsError(message, code = 'ERROR') {
+  if (typeof document === 'undefined') return;
+
+  const contentEl = document.getElementById('res-tests-content');
+  const emptyState = document.getElementById('res-tests-empty-state');
+  const emptyDesc = document.getElementById('res-tests-empty-desc');
+  const countBadge = document.getElementById('res-tests-count');
+  const metricItem = document.getElementById('res-tests-metric');
+
+  if (contentEl) {
+    contentEl.classList.add('hidden');
+    contentEl.innerHTML = '';
+  }
+  if (emptyState) emptyState.classList.remove('hidden');
+  if (emptyDesc) {
+    emptyDesc.innerHTML = `<strong>Request Execution Error:</strong> Assertions were not evaluated because no HTTP response was received (${escapeHtml(code)}: ${escapeHtml(message)}).`;
+  }
+  if (countBadge) countBadge.classList.add('hidden');
+  if (metricItem) metricItem.classList.add('hidden');
+  if (activeResponse) activeResponse.test_results = null;
+}
+
+/**
+ * Resets the Test Results viewer to clean initial state.
+ */
+function resetTestResultsViewer() {
+  if (typeof document === 'undefined') return;
+
+  const contentEl = document.getElementById('res-tests-content');
+  const emptyState = document.getElementById('res-tests-empty-state');
+  const emptyDesc = document.getElementById('res-tests-empty-desc');
+  const countBadge = document.getElementById('res-tests-count');
+  const metricItem = document.getElementById('res-tests-metric');
+
+  if (contentEl) {
+    contentEl.classList.add('hidden');
+    contentEl.innerHTML = '';
+  }
+  if (emptyState) emptyState.classList.remove('hidden');
+  if (emptyDesc) {
+    emptyDesc.textContent = 'No test results available. Configure assertions in the Tests tab and send a request to view automated evaluation results.';
+  }
+  if (countBadge) countBadge.classList.add('hidden');
+  if (metricItem) metricItem.classList.add('hidden');
+  if (activeResponse) activeResponse.test_results = null;
+}
+
+/**
+ * Renders historical test results into History Detail Modal without re-evaluating assertions.
+ *
+ * @param {object} rec - Historical record from database
+ */
+function renderHistoricalTestResults(rec) {
+  if (typeof document === 'undefined') return;
+
+  const testItem = document.getElementById('hist-detail-test-item');
+  const testPill = document.getElementById('hist-detail-test-pill');
+  const testCounter = document.getElementById('hist-detail-tests-counter');
+  const testContent = document.getElementById('hist-detail-tests-content');
+
+  let testResults = null;
+  if (rec && rec.test_results) {
+    if (typeof rec.test_results === 'string') {
+      try {
+        testResults = JSON.parse(rec.test_results);
+      } catch {
+        testResults = null;
+      }
+    } else if (typeof rec.test_results === 'object') {
+      testResults = rec.test_results;
+    }
+  }
+
+  if (testResults && testResults.summary && testResults.summary.total > 0) {
+    const { total, passed, status } = testResults.summary;
+    if (testItem) testItem.classList.remove('hidden');
+    if (testPill) {
+      testPill.textContent = `${passed}/${total} Passed`;
+      testPill.className = `status-pill ${status === 'passed' ? 'status-pill-success' : 'status-pill-danger'}`;
+    }
+    if (testCounter) {
+      testCounter.textContent = `${passed}/${total}`;
+      testCounter.classList.remove('hidden');
+    }
+    if (testContent) {
+      renderTestResultsToUI(testResults, 'hist-detail-tests-content');
+    }
+  } else {
+    if (testItem) testItem.classList.add('hidden');
+    if (testCounter) testCounter.classList.add('hidden');
+    if (testContent) {
+      testContent.innerHTML = '<div class="response-empty-state"><p class="empty-state-desc">No test assertions were recorded for this historical execution.</p></div>';
+    }
+  }
+}
+
+/* ==========================================================================
    9. Testing and Module Compatibility Export
    ========================================================================== */
 
@@ -5599,7 +6807,31 @@ if (typeof window !== 'undefined') {
     closeHistoryCompareModal,
     switchCompareSection,
     renderCompareModalContent,
-    initHistoryComparison
+    initHistoryComparison,
+    initAssertionBuilder,
+    renderAssertions,
+    updateTestsCount,
+    openAssertionBuilder,
+    closeAssertionBuilder,
+    updateAssertionFormForType,
+    checkPropertySensitivity,
+    checkExpectedVisibility,
+    saveAssertionFromForm,
+    deleteAssertion,
+    toggleAssertionEnabled,
+    clearAllAssertions,
+    parseExpectedValue,
+    generateAssertionId,
+    isSensitiveHeaderName,
+    isSensitivePropertyName,
+    getActiveRequestAssertions: () => activeRequest.assertions,
+    setActiveRequestAssertions: (arr) => { activeRequest.assertions = Array.isArray(arr) ? arr : []; },
+    getAssertionEngine,
+    evaluateAndRenderTestResults,
+    renderTestResultsToUI,
+    renderTestResultsError,
+    resetTestResultsViewer,
+    renderHistoricalTestResults
   };
 }
 
@@ -5684,7 +6916,31 @@ if (typeof module !== 'undefined' && module.exports) {
     closeHistoryCompareModal,
     switchCompareSection,
     renderCompareModalContent,
-    initHistoryComparison
+    initHistoryComparison,
+    initAssertionBuilder,
+    renderAssertions,
+    updateTestsCount,
+    openAssertionBuilder,
+    closeAssertionBuilder,
+    updateAssertionFormForType,
+    checkPropertySensitivity,
+    checkExpectedVisibility,
+    saveAssertionFromForm,
+    deleteAssertion,
+    toggleAssertionEnabled,
+    clearAllAssertions,
+    parseExpectedValue,
+    generateAssertionId,
+    isSensitiveHeaderName,
+    isSensitivePropertyName,
+    getActiveRequestAssertions: () => activeRequest.assertions,
+    setActiveRequestAssertions: (arr) => { activeRequest.assertions = Array.isArray(arr) ? arr : []; },
+    getAssertionEngine,
+    evaluateAndRenderTestResults,
+    renderTestResultsToUI,
+    renderTestResultsError,
+    resetTestResultsViewer,
+    renderHistoricalTestResults
   };
 }
 

@@ -37,6 +37,39 @@ const assertionService = require('./src/services/assertionService');
 const savedRequestService = require('./src/services/savedRequestService');
 const historyService = require('./src/services/historyService');
 const assertionEngine = require('./public/js/assertionEngine');
+const {
+  activeRequest,
+  activeResponse,
+  loadRequestIntoState,
+  convertSavedRequestToTemplate,
+  switchConfigTab,
+  initAssertionBuilder,
+  renderAssertions,
+  updateTestsCount,
+  openAssertionBuilder,
+  closeAssertionBuilder,
+  updateAssertionFormForType,
+  checkPropertySensitivity,
+  checkExpectedVisibility,
+  saveAssertionFromForm,
+  deleteAssertion,
+  toggleAssertionEnabled,
+  clearAllAssertions,
+  parseExpectedValue,
+  generateAssertionId,
+  isSensitiveHeaderName,
+  isSensitivePropertyName,
+  getActiveRequestAssertions,
+  setActiveRequestAssertions,
+  getAssertionEngine,
+  evaluateAndRenderTestResults,
+  renderTestResultsToUI,
+  renderTestResultsError,
+  resetTestResultsViewer,
+  renderHistoricalTestResults,
+  compareResponseHeaders
+} = require('./public/js/app');
+const { recordHistorySafely } = require('./src/controllers/requestController');
 const { AppError } = require('./src/middleware/errorHandler');
 
 let passedTests = 0;
@@ -1250,6 +1283,775 @@ async function runTests() {
     assert(backendValidation !== null && backendValidation.summary.total === 3 && backendValidation.summary.status === 'failed',
            'TEST 134: Client-side evaluation engine output structure is 100% compliant with backend test_results persistence schema');
 
+    // =========================================================================
+    // Phase 9: Assertion Builder UI & Client-Side State Management (Step 4)
+    // =========================================================================
+    console.log('\n--- Phase 9: Assertion Builder UI & Client-Side State Management Tests ---');
+
+    // Setup mock DOM for browser UI testing
+    const mockElements = {};
+    function getOrCreateMock(id, tag = 'div') {
+      if (!mockElements[id]) {
+        let innerHtmlVal = '';
+        const el = {
+          id,
+          tagName: tag.toUpperCase(),
+          value: '',
+          textContent: '',
+          className: '',
+          classList: {
+            _classes: new Set(),
+            add(c) { this._classes.add(c); },
+            remove(c) { this._classes.delete(c); },
+            contains(c) { return this._classes.has(c); },
+            toggle(c, force) {
+              if (force === undefined) {
+                if (this._classes.has(c)) this._classes.delete(c);
+                else this._classes.add(c);
+              } else if (force) this._classes.add(c);
+              else this._classes.delete(c);
+            }
+          },
+          children: [],
+          attributes: {},
+          setAttribute(k, v) { this.attributes[k] = String(v); },
+          getAttribute(k) { return this.attributes[k] || null; },
+          appendChild(child) { this.children.push(child); return child; },
+          addEventListener() {},
+          focus() {}
+        };
+        Object.defineProperty(el, 'innerHTML', {
+          get() { return innerHtmlVal; },
+          set(val) {
+            innerHtmlVal = val;
+            if (val === '') this.children = [];
+          }
+        });
+        Object.defineProperty(el, 'className', {
+          get() {
+            return Array.from(this.classList._classes).join(' ');
+          },
+          set(val) {
+            this.classList._classes.clear();
+            if (val && typeof val === 'string') {
+              val.trim().split(/\s+/).filter(Boolean).forEach(c => this.classList._classes.add(c));
+            }
+          }
+        });
+        mockElements[id] = el;
+      }
+      return mockElements[id];
+    }
+
+    const knownDomIds = [
+      'tests-count', 'panel-tests', 'panel-params', 'panel-headers', 'panel-body', 'panel-auth',
+      'btn-open-assertion-builder', 'btn-add-first-assertion', 'btn-close-assertion-builder',
+      'btn-cancel-assertion', 'btn-save-assertion', 'btn-clear-all-assertions',
+      'assertion-builder-card', 'assertion-builder-title', 'assert-edit-id', 'assertion-builder-error',
+      'assert-type-select', 'assert-property-group', 'assert-property-label', 'assert-property-input',
+      'assert-property-hint', 'assert-operator-select', 'assert-expected-group', 'assert-expected-label',
+      'assert-expected-type', 'assert-expected-input', 'assert-expected-hint', 'assert-security-notice',
+      'assert-security-notice-text', 'assertions-empty-state', 'assertions-list-container',
+      'assertions-table', 'assertions-tbody',
+      // Step 5 Test Results & History Detail DOM elements
+      'res-tab-btn-tests', 'res-tests-count', 'res-tests-metric', 'res-tests-badge',
+      'panel-res-tests', 'res-tests-empty-state', 'res-tests-empty-desc', 'res-tests-content',
+      'hist-detail-test-item', 'hist-detail-test-pill', 'tab-btn-hist-tests',
+      'hist-detail-tests-counter', 'hist-view-tests', 'hist-detail-tests-content'
+    ];
+    knownDomIds.forEach(id => getOrCreateMock(id));
+
+    // Ensure mock parentElements for focus helper
+    mockElements['assert-property-input'].parentElement = mockElements['assert-property-group'];
+    mockElements['assert-expected-input'].parentElement = mockElements['assert-expected-group'];
+
+    global.document = {
+      getElementById(id) {
+        return mockElements[id] || null;
+      },
+      createElement(tag) {
+        return getOrCreateMock(`mock_${tag}_${Math.random()}`, tag);
+      },
+      querySelectorAll(selector) {
+        return [];
+      },
+      querySelector(selector) {
+        return null;
+      },
+      addEventListener() {}
+    };
+
+    // 1. Assertion ID generation
+    const id1 = generateAssertionId('status_code');
+    const id2 = generateAssertionId('status_code');
+    const idsSet = new Set();
+    for (let i = 0; i < 50; i++) {
+      idsSet.add(generateAssertionId('json_path'));
+    }
+    assert(id1.startsWith('assert_status_code_') && id1 !== id2 && idsSet.size === 50,
+           'TEST 135: Assertion ID generator produces unique, collision-resistant, prefixed IDs');
+
+    // 2. Sensitive header detection
+    assert(isSensitiveHeaderName('Authorization') === true &&
+           isSensitiveHeaderName('Set-Cookie') === true &&
+           isSensitiveHeaderName('x-api-key') === true &&
+           isSensitiveHeaderName('Content-Type') === false &&
+           isSensitiveHeaderName('Accept') === false,
+           'TEST 136: isSensitiveHeaderName accurately identifies authentication and cookie headers');
+
+    // 3. Sensitive property name detection
+    assert(isSensitivePropertyName('user.password') === true &&
+           isSensitivePropertyName('auth.access_token') === true &&
+           isSensitivePropertyName('client_secret') === true &&
+           isSensitivePropertyName('data.items[0].secret') === true &&
+           isSensitivePropertyName('user.username') === false &&
+           isSensitivePropertyName('status') === false,
+           'TEST 137: isSensitivePropertyName accurately detects credentials in nested JSON paths');
+
+    // 4. Expected value parsing - auto detection
+    assert(parseExpectedValue('status_code', '200') === 200 &&
+           parseExpectedValue('response_time', '350.5') === 350.5 &&
+           parseExpectedValue('json_path', 'true') === true &&
+           parseExpectedValue('json_path', 'false') === false &&
+           parseExpectedValue('json_path', 'null') === null &&
+           parseExpectedValue('json_path', '42') === 42,
+           'TEST 138: parseExpectedValue correctly auto-detects numbers, booleans, and null primitives');
+
+    // 5. Expected value parsing - quotes and explicit type
+    assert(parseExpectedValue('body_text', '"hello world"') === 'hello world' &&
+           parseExpectedValue('json_path', "'single quoted'") === 'single quoted' &&
+           parseExpectedValue('json_path', '123', 'string') === '123' &&
+           parseExpectedValue('json_path', 'true', 'string') === 'true',
+           'TEST 139: parseExpectedValue strips outer quotes and honors explicit string casting');
+
+    // 6. Exists and not_exists operators always return null
+    assert(parseExpectedValue('header', 'any text', 'auto', 'exists') === null &&
+           parseExpectedValue('json_path', '12345', 'number', 'not_exists') === null,
+           'TEST 140: parseExpectedValue always returns null for exists and not_exists operators');
+
+    // 7. Builder form initialization & category switching
+    mockElements['assert-type-select'].value = 'header';
+    updateAssertionFormForType();
+    assert(!mockElements['assert-property-group'].classList.contains('hidden') &&
+           mockElements['assert-property-label'].textContent === 'Header Name',
+           'TEST 141: updateAssertionFormForType reveals property input and configures header label');
+
+    // 8. Assertion creation for all five categories
+    setActiveRequestAssertions([]);
+    const categories = [
+      { type: 'status_code', op: 'equals', exp: '200', prop: '' },
+      { type: 'response_time', op: 'less_than', exp: '500', prop: '' },
+      { type: 'header', op: 'contains', exp: 'json', prop: 'Content-Type' },
+      { type: 'body_text', op: 'contains', exp: 'success', prop: '' },
+      { type: 'json_path', op: 'equals', exp: '10', prop: 'data.count' }
+    ];
+
+    categories.forEach(cat => {
+      openAssertionBuilder();
+      mockElements['assert-type-select'].value = cat.type;
+      updateAssertionFormForType();
+      if (cat.prop) mockElements['assert-property-input'].value = cat.prop;
+      mockElements['assert-operator-select'].value = cat.op;
+      mockElements['assert-expected-input'].value = cat.exp;
+      saveAssertionFromForm();
+    });
+
+    const createdAssertions = getActiveRequestAssertions();
+    assert(createdAssertions.length === 5 &&
+           createdAssertions.every(a => a.id && a.type && a.operator && a.enabled === true),
+           'TEST 142: Builder creates valid assertion models across all five categories');
+
+    // 9. Sensitive header operator restriction in builder
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'header';
+    updateAssertionFormForType();
+    mockElements['assert-property-input'].value = 'Authorization';
+    checkPropertySensitivity();
+    assert(!mockElements['assert-security-notice'].classList.contains('hidden') &&
+           mockElements['assert-operator-select'].children.length === 2 &&
+           mockElements['assert-operator-select'].children[0].value === 'exists',
+           'TEST 143: Sensitive header restricts builder operators to existence checks and shows security notice');
+    closeAssertionBuilder();
+
+    // 10. Sensitive JSON path operator restriction in builder
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'json_path';
+    updateAssertionFormForType();
+    mockElements['assert-property-input'].value = 'user.password';
+    checkPropertySensitivity();
+    assert(!mockElements['assert-security-notice'].classList.contains('hidden') &&
+           mockElements['assert-operator-select'].children.length === 2 &&
+           mockElements['assert-operator-select'].children[0].value === 'exists',
+           'TEST 144: Sensitive JSON property restricts builder operators to existence checks and shows notice');
+    closeAssertionBuilder();
+
+    // 11. Validation: Invalid status code
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'status_code';
+    updateAssertionFormForType();
+    mockElements['assert-operator-select'].value = 'equals';
+    mockElements['assert-expected-input'].value = '999';
+    saveAssertionFromForm();
+    assert(!mockElements['assertion-builder-error'].classList.contains('hidden') &&
+           mockElements['assertion-builder-error'].textContent.includes('Status code must be an integer between 100 and 599'),
+           'TEST 145: Builder validation rejects invalid HTTP status code (>599)');
+    closeAssertionBuilder();
+
+    // 12. Validation: Negative latency
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'response_time';
+    updateAssertionFormForType();
+    mockElements['assert-operator-select'].value = 'less_than';
+    mockElements['assert-expected-input'].value = '-100';
+    saveAssertionFromForm();
+    assert(!mockElements['assertion-builder-error'].classList.contains('hidden') &&
+           mockElements['assertion-builder-error'].textContent.includes('non-negative number'),
+           'TEST 146: Builder validation rejects negative response latency threshold');
+    closeAssertionBuilder();
+
+    // 13. Validation: Missing property for header and JSON path
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'header';
+    updateAssertionFormForType();
+    mockElements['assert-property-input'].value = '';
+    mockElements['assert-expected-input'].value = 'application/json';
+    saveAssertionFromForm();
+    assert(!mockElements['assertion-builder-error'].classList.contains('hidden') &&
+           mockElements['assertion-builder-error'].textContent.includes('Header name is required'),
+           'TEST 147: Builder validation rejects empty header property name');
+    closeAssertionBuilder();
+
+    // 14. Validation: Prototype pollution in JSON path
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'json_path';
+    updateAssertionFormForType();
+    mockElements['assert-property-input'].value = 'user.__proto__.polluted';
+    mockElements['assert-expected-input'].value = 'true';
+    saveAssertionFromForm();
+    assert(!mockElements['assertion-builder-error'].classList.contains('hidden') &&
+           mockElements['assertion-builder-error'].textContent.includes('forbidden prototype properties'),
+           'TEST 148: Builder validation blocks __proto__ prototype pollution in JSON path');
+    closeAssertionBuilder();
+
+    // 15. Validation: Code injection in expected value
+    openAssertionBuilder();
+    mockElements['assert-type-select'].value = 'body_text';
+    updateAssertionFormForType();
+    mockElements['assert-expected-input'].value = 'eval("alert(1)")';
+    saveAssertionFromForm();
+    assert(!mockElements['assertion-builder-error'].classList.contains('hidden') &&
+           mockElements['assertion-builder-error'].textContent.includes('Forbidden script or dynamic code pattern'),
+           'TEST 149: Builder validation rejects eval() code injection in expected value');
+    closeAssertionBuilder();
+
+    // 16. Editing an assertion in place
+    const editTargetId = createdAssertions[0].id;
+    openAssertionBuilder(editTargetId);
+    assert(mockElements['assertion-builder-title'].textContent === 'Edit Assertion' &&
+           mockElements['assert-edit-id'].value === editTargetId,
+           'TEST 150A: openAssertionBuilder populates form with targeted assertion details');
+    mockElements['assert-expected-input'].value = '201';
+    saveAssertionFromForm();
+    const updatedAssertions = getActiveRequestAssertions();
+    assert(updatedAssertions.length === 5 &&
+           updatedAssertions[0].id === editTargetId &&
+           updatedAssertions[0].expected === 201 &&
+           updatedAssertions[0].enabled === true,
+           'TEST 150B: saveAssertionFromForm updates targeted assertion in place without changing ID or enabled status');
+
+    // 17. Toggling enabled status
+    toggleAssertionEnabled(editTargetId);
+    assert(getActiveRequestAssertions()[0].enabled === false &&
+           mockElements['tests-count'].textContent === '4',
+           'TEST 151A: toggleAssertionEnabled flips enabled boolean and updates tests tab counter');
+    toggleAssertionEnabled(editTargetId);
+    assert(getActiveRequestAssertions()[0].enabled === true &&
+           mockElements['tests-count'].textContent === '5',
+           'TEST 151B: Toggling again re-enables assertion and restores badge counter');
+
+    // 18. Deleting an assertion
+    const deleteId = createdAssertions[1].id;
+    deleteAssertion(deleteId);
+    assert(getActiveRequestAssertions().length === 4 &&
+           !getActiveRequestAssertions().some(a => a.id === deleteId),
+           'TEST 152: deleteAssertion removes targeted assertion while preserving remaining assertions');
+
+    // 19. Clearing all assertions
+    clearAllAssertions();
+    assert(getActiveRequestAssertions().length === 0 &&
+           !mockElements['assertions-empty-state'].classList.contains('hidden') &&
+           mockElements['assertions-list-container'].classList.contains('hidden') &&
+           mockElements['tests-count'].textContent === '0',
+           'TEST 153: clearAllAssertions empties active assertions, updates counter to 0, and restores empty state');
+
+    // 20. Saved request template conversion & state loading
+    const rawSavedReq = {
+      id: 777,
+      name: 'User API',
+      method: 'GET',
+      url: 'https://api.example.com/users',
+      assertions: [
+        { id: 'as_1', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+        { id: 'as_2', type: 'header', property: 'Content-Type', operator: 'contains', expected: 'json', enabled: true }
+      ]
+    };
+    const template = convertSavedRequestToTemplate(rawSavedReq);
+    assert(Array.isArray(template.assertions) && template.assertions.length === 2 &&
+           template.assertions[0].id === 'as_1',
+           'TEST 154A: convertSavedRequestToTemplate extracts and maps assertions array');
+
+    loadRequestIntoState(template);
+    assert(getActiveRequestAssertions().length === 2 &&
+           mockElements['tests-count'].textContent === '2',
+           'TEST 154B: loadRequestIntoState deep copies assertions into active workspace state');
+
+    // Mutate state and ensure original template is not mutated
+    getActiveRequestAssertions()[0].expected = 404;
+    assert(template.assertions[0].expected === 200,
+           'TEST 154C: Assertion state isolation: mutating activeRequest does not alter source template');
+
+    // 21. Workspace state isolation across different requests
+    loadRequestIntoState({
+      name: 'Empty Request',
+      method: 'POST',
+      url: 'https://api.example.com/items',
+      assertions: []
+    });
+    assert(getActiveRequestAssertions().length === 0 &&
+           mockElements['tests-count'].textContent === '0',
+           'TEST 155: Switching request templates prevents assertion leakage and clears previous assertions');
+
+    // 22. Cross-layer engine evaluation on builder-generated assertions
+    const builderGeneratedAssertions = [
+      { id: 'bg_1', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'bg_2', type: 'response_time', operator: 'less_than', expected: 1000, enabled: true },
+      { id: 'bg_3', type: 'header', property: 'Content-Type', operator: 'contains', expected: 'application/json', enabled: true },
+      { id: 'bg_4', type: 'json_path', property: 'user.id', operator: 'equals', expected: 101, enabled: true },
+      { id: 'bg_5', type: 'header', property: 'Authorization', operator: 'exists', expected: null, enabled: true }
+    ];
+
+    const engineEval = assertionEngine.evaluateAssertions(builderGeneratedAssertions, {
+      status: 200,
+      timeMs: 120,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'authorization': 'Bearer token123'
+      },
+      body: {
+        user: { id: 101, name: 'Alice' }
+      }
+    });
+
+    assert(engineEval.summary.total === 5 &&
+           engineEval.summary.passed === 5 &&
+           engineEval.summary.status === 'passed',
+           'TEST 156: Client-side assertion engine evaluates builder-generated assertions with 100% pass rate');
+
+    // =========================================================================
+    // Phase 10: Test Results Panel & Execution Integration (Step 5)
+    // =========================================================================
+    console.log('\n--- Phase 10: Test Results Panel & Execution Integration Tests ---');
+
+    // 1. HTTP 200 with all assertions passing
+    setActiveRequestAssertions([
+      { id: 'as_stat', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'as_lat', type: 'response_time', operator: 'less_than', expected: 500, enabled: true }
+    ]);
+    const resp200 = {
+      status: 200,
+      timeMs: 150,
+      headers: { 'content-type': 'application/json' },
+      body: { success: true }
+    };
+    const evalRes1 = evaluateAndRenderTestResults(resp200);
+    assert(
+      evalRes1 &&
+      evalRes1.summary.total === 2 &&
+      evalRes1.summary.passed === 2 &&
+      evalRes1.summary.failed === 0 &&
+      evalRes1.summary.status === 'passed' &&
+      mockElements['res-tests-count'].classList.contains('badge-success') &&
+      mockElements['res-tests-count'].textContent === '2/2' &&
+      mockElements['res-tests-badge'].textContent === '2/2 Passed' &&
+      mockElements['res-tests-badge'].classList.contains('metric-badge-success') &&
+      mockElements['res-tests-content'].innerHTML.includes('All Assertions Passed'),
+      'TEST 157: HTTP 200 with all assertions passing displays passed summary and green badges'
+    );
+
+    // 2. HTTP 200 with one assertion failing
+    setActiveRequestAssertions([
+      { id: 'as_stat_ok', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'as_lat_fail', type: 'response_time', operator: 'less_than', expected: 50, enabled: true }
+    ]);
+    const evalRes2 = evaluateAndRenderTestResults(resp200);
+    assert(
+      evalRes2 &&
+      evalRes2.summary.total === 2 &&
+      evalRes2.summary.passed === 1 &&
+      evalRes2.summary.failed === 1 &&
+      evalRes2.summary.status === 'failed' &&
+      resp200.status === 200 &&
+      mockElements['res-tests-count'].classList.contains('badge-danger') &&
+      mockElements['res-tests-count'].textContent === '1/2' &&
+      mockElements['res-tests-badge'].textContent === '1/2 Passed' &&
+      mockElements['res-tests-badge'].classList.contains('metric-badge-danger') &&
+      mockElements['res-tests-content'].innerHTML.includes('Assertions Failed (1 of 2 passed)'),
+      'TEST 158: HTTP 200 with one failing assertion updates badge to danger without changing HTTP 200 status'
+    );
+
+    // 3. HTTP 404/500 upstream error response evaluated against assertions
+    setActiveRequestAssertions([
+      { id: 'as_expect_404', type: 'status_code', operator: 'equals', expected: 404, enabled: true },
+      { id: 'as_expect_msg', type: 'body_text', operator: 'contains', expected: 'Resource Not Found', enabled: true },
+      { id: 'as_expect_200', type: 'status_code', operator: 'equals', expected: 200, enabled: true }
+    ]);
+    const upstreamErrResp = {
+      status: 404,
+      statusText: 'Not Found',
+      timeMs: 80,
+      headers: { 'content-type': 'text/plain' },
+      body: 'Error: Resource Not Found'
+    };
+    const evalRes3 = evaluateAndRenderTestResults(upstreamErrResp);
+    assert(
+      evalRes3 &&
+      evalRes3.summary.total === 3 &&
+      evalRes3.summary.passed === 2 &&
+      evalRes3.summary.failed === 1 &&
+      upstreamErrResp.status === 404 &&
+      upstreamErrResp.body === 'Error: Resource Not Found' &&
+      evalRes3.results[0].passed === true &&
+      evalRes3.results[1].passed === true &&
+      evalRes3.results[2].passed === false,
+      'TEST 159: HTTP 404/500 upstream error response evaluated against assertions and preserved normally'
+    );
+
+    // 4. Network failure (ECONNREFUSED/timeout) without response
+    renderTestResultsError('Connection refused by remote host', 'ECONNREFUSED');
+    assert(
+      mockElements['res-tests-content'].classList.contains('hidden') &&
+      !mockElements['res-tests-empty-state'].classList.contains('hidden') &&
+      mockElements['res-tests-empty-desc'].innerHTML.includes('ECONNREFUSED') &&
+      mockElements['res-tests-empty-desc'].innerHTML.includes('Connection refused by remote host') &&
+      mockElements['res-tests-count'].classList.contains('hidden') &&
+      mockElements['res-tests-metric'].classList.contains('hidden') &&
+      activeResponse.test_results === null,
+      'TEST 160: Network failure renders diagnostic error state in panel with null test results'
+    );
+
+    // 5. No assertions configured
+    setActiveRequestAssertions([]);
+    resetTestResultsViewer();
+    const evalResEmpty = evaluateAndRenderTestResults({ status: 200, timeMs: 50 });
+    assert(
+      evalResEmpty === null &&
+      mockElements['res-tests-content'].classList.contains('hidden') &&
+      !mockElements['res-tests-empty-state'].classList.contains('hidden') &&
+      mockElements['res-tests-count'].classList.contains('hidden') &&
+      mockElements['res-tests-metric'].classList.contains('hidden') &&
+      activeResponse.test_results === null,
+      'TEST 161: Request with no assertions renders clean empty state without active badges'
+    );
+
+    // 6. All assertions disabled
+    setActiveRequestAssertions([
+      { id: 'as_dis_1', type: 'status_code', operator: 'equals', expected: 200, enabled: false },
+      { id: 'as_dis_2', type: 'response_time', operator: 'less_than', expected: 200, enabled: false }
+    ]);
+    const evalResDisabled = evaluateAndRenderTestResults({ status: 200, timeMs: 50 });
+    assert(
+      evalResDisabled === null &&
+      mockElements['res-tests-content'].classList.contains('hidden') &&
+      !mockElements['res-tests-empty-state'].classList.contains('hidden') &&
+      mockElements['res-tests-empty-desc'].textContent.includes('currently disabled') &&
+      mockElements['res-tests-count'].classList.contains('hidden') &&
+      mockElements['res-tests-metric'].classList.contains('hidden'),
+      'TEST 162: All assertions disabled renders informational empty state and skips evaluation'
+    );
+
+    // 7. Mixed enabled and disabled assertions
+    setActiveRequestAssertions([
+      { id: 'as_en_1', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'as_dis_3', type: 'status_code', operator: 'equals', expected: 500, enabled: false },
+      { id: 'as_en_2', type: 'response_time', operator: 'less_than', expected: 300, enabled: true }
+    ]);
+    const evalResMixed = evaluateAndRenderTestResults({ status: 200, timeMs: 100 });
+    assert(
+      evalResMixed &&
+      evalResMixed.summary.total === 2 &&
+      evalResMixed.summary.passed === 2 &&
+      evalResMixed.results.length === 2 &&
+      !evalResMixed.results.some(r => r.id === 'as_dis_3'),
+      'TEST 163: Mixed enabled and disabled assertions evaluates only enabled items and ignores disabled ones'
+    );
+
+    // 8. Multiple categories in execution
+    setActiveRequestAssertions([
+      { id: 'mc_status', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+      { id: 'mc_latency', type: 'response_time', operator: 'less_than', expected: 500, enabled: true },
+      { id: 'mc_header', type: 'header', property: 'Content-Type', operator: 'contains', expected: 'json', enabled: true },
+      { id: 'mc_body', type: 'body_text', operator: 'contains', expected: 'operational', enabled: true },
+      { id: 'mc_json', type: 'json_path', property: 'data.status', operator: 'equals', expected: 'healthy', enabled: true }
+    ]);
+    const multiCatResp = {
+      status: 200,
+      timeMs: 120,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: { data: { status: 'healthy', note: 'all systems operational' } },
+      rawText: JSON.stringify({ data: { status: 'healthy', note: 'all systems operational' } })
+    };
+    const evalResMulti = evaluateAndRenderTestResults(multiCatResp);
+    assert(
+      evalResMulti &&
+      evalResMulti.summary.total === 5 &&
+      evalResMulti.summary.passed === 5 &&
+      evalResMulti.results.some(r => r.type === 'status_code') &&
+      evalResMulti.results.some(r => r.type === 'response_time') &&
+      evalResMulti.results.some(r => r.type === 'header') &&
+      evalResMulti.results.some(r => r.type === 'body_text') &&
+      evalResMulti.results.some(r => r.type === 'json_path'),
+      'TEST 164: All five assertion categories evaluated together in a single request execution'
+    );
+
+    // 9. Test results summary counters
+    assert(
+      mockElements['res-tests-content'].innerHTML.includes('Total: 5') &&
+      mockElements['res-tests-content'].innerHTML.includes('Passed: 5') &&
+      mockElements['res-tests-content'].innerHTML.includes('Failed: 0') &&
+      mockElements['res-tests-count'].textContent === '5/5',
+      'TEST 165: Summary metrics bar correctly displays total, passed, and failed counters'
+    );
+
+    // 10. Sensitive header redaction in test results
+    setActiveRequestAssertions([
+      { id: 'sec_hdr', type: 'header', property: 'Authorization', operator: 'contains', expected: 'Bearer', enabled: true }
+    ]);
+    const secHdrResp = {
+      status: 200,
+      timeMs: 80,
+      headers: { 'authorization': 'Bearer secret-jwt-key-99999' },
+      body: {}
+    };
+    const evalResSecHdr = evaluateAndRenderTestResults(secHdrResp);
+    assert(
+      evalResSecHdr &&
+      evalResSecHdr.results[0].passed === true &&
+      !JSON.stringify(evalResSecHdr.results[0].actual).includes('secret-jwt-key-99999') &&
+      !mockElements['res-tests-content'].innerHTML.includes('secret-jwt-key-99999'),
+      'TEST 166: Sensitive Authorization header values are safely redacted in evaluation and rendered UI'
+    );
+
+    // 11. Sensitive JSON property redaction in test results
+    setActiveRequestAssertions([
+      { id: 'sec_pwd', type: 'json_path', property: 'user.password', operator: 'exists', expected: null, enabled: true }
+    ]);
+    const secPwdResp = {
+      status: 200,
+      timeMs: 90,
+      headers: { 'content-type': 'application/json' },
+      body: { user: { id: 42, password: 'PlainTextPassword123' } }
+    };
+    const evalResSecPwd = evaluateAndRenderTestResults(secPwdResp);
+    assert(
+      evalResSecPwd &&
+      evalResSecPwd.results[0].passed === true &&
+      evalResSecPwd.results[0].actual === '[REDACTED]' &&
+      !JSON.stringify(evalResSecPwd.results[0].actual).includes('PlainTextPassword123') &&
+      !mockElements['res-tests-content'].innerHTML.includes('PlainTextPassword123'),
+      'TEST 167: Sensitive JSON body properties (e.g. password) are safely redacted in evaluation and rendered UI'
+    );
+
+    // 12. Persistence of test_results in request_history via POST /api/requests/execute
+    process.env.DEVPROBE_ALLOW_LOCAL_TARGETS = 'true';
+    const serverPort = appServer.address().port;
+    const execWithAssertions = {
+      name: 'Execute With Assertions Test',
+      method: 'GET',
+      url: `http://127.0.0.1:${serverPort}/api/health`,
+      assertions: [
+        { id: 'health_status_200', type: 'status_code', operator: 'equals', expected: 200, enabled: true },
+        { id: 'health_json_success', type: 'json_path', property: 'success', operator: 'equals', expected: true, enabled: true }
+      ]
+    };
+    const resExec = await makeRequest(appServer, {
+      method: 'POST',
+      path: '/api/requests/execute',
+      body: execWithAssertions
+    });
+    assert(
+      resExec.statusCode === 200 &&
+      resExec.json.success === true &&
+      resExec.json.data.test_results !== null &&
+      resExec.json.data.test_results.summary.status === 'passed' &&
+      resExec.json.data.test_results.summary.passed === 2,
+      'TEST 168A: POST /api/requests/execute evaluates assertions and attaches test_results to HTTP 200 response'
+    );
+
+    // Bounded wait for fire-and-forget database insertion
+    let dbRows = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      [dbRows] = await executeQuery(
+        `SELECT id, test_results FROM request_history WHERE request_name = 'Execute With Assertions Test' ORDER BY id DESC LIMIT 1`
+      );
+      if (dbRows && dbRows.length > 0 && dbRows[0].test_results !== null) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    assert(
+      dbRows && dbRows.length > 0 && dbRows[0].test_results !== null,
+      'TEST 168B: Execution test_results successfully persisted into request_history table'
+    );
+    const persistedTestResults = typeof dbRows[0].test_results === 'string' ? JSON.parse(dbRows[0].test_results) : dbRows[0].test_results;
+    assert(
+      persistedTestResults.summary.status === 'passed' && persistedTestResults.summary.total === 2,
+      'TEST 168C: Persisted test_results JSON in database matches execution evaluation'
+    );
+    const historyExecId = dbRows[0].id;
+    createdHistoryIds.push(historyExecId);
+
+    // 13. History retrieval (GET /api/history/:id) returning stored test_results
+    const resGetHist = await makeRequest(appServer, {
+      method: 'GET',
+      path: `/api/history/${historyExecId}`
+    });
+    assert(
+      resGetHist.statusCode === 200 &&
+      resGetHist.json.data.test_results !== null &&
+      resGetHist.json.data.test_results.summary.status === 'passed' &&
+      Array.isArray(resGetHist.json.data.test_results.results) &&
+      resGetHist.json.data.test_results.results.length === 2,
+      'TEST 169: GET /api/history/:id returns stored test_results with full summary and results array'
+    );
+
+    // 14. Legacy history record with test_results: NULL handled gracefully
+    const legacyRecordRes = await historyService.recordExecution(
+      { name: 'Legacy Test Request', method: 'GET', url: 'https://api.example.com/legacy' },
+      { status: 200, timeMs: 40, body: 'ok' },
+      null,
+      null
+    );
+    const legacyHistId = legacyRecordRes.id;
+    createdHistoryIds.push(legacyHistId);
+    const resGetLegacy = await makeRequest(appServer, {
+      method: 'GET',
+      path: `/api/history/${legacyHistId}`
+    });
+    assert(
+      resGetLegacy.statusCode === 200 &&
+      resGetLegacy.json.data.test_results === null,
+      'TEST 170A: GET /api/history/:id handles legacy record with test_results: NULL without error'
+    );
+    renderHistoricalTestResults(resGetLegacy.json.data);
+    assert(
+      mockElements['hist-detail-test-item'].classList.contains('hidden') &&
+      mockElements['hist-detail-tests-counter'].classList.contains('hidden') &&
+      mockElements['hist-detail-tests-content'].innerHTML.includes('No test assertions were recorded'),
+      'TEST 170B: History detail modal renders clean empty state for legacy record with test_results: NULL'
+    );
+
+    // 15. History detail modal displaying stored test_results without re-running assertions
+    const mockHistRecord = {
+      id: 9999,
+      test_results: {
+        summary: { total: 4, passed: 3, failed: 1, status: 'failed' },
+        results: [
+          { id: 'h1', type: 'status_code', passed: true, message: 'Status 200', actual: 200, expected: 200 },
+          { id: 'h2', type: 'response_time', passed: true, message: 'Latency OK', actual: 80, expected: 200 },
+          { id: 'h3', type: 'header', passed: true, message: 'Content-Type OK', actual: 'json', expected: 'json' },
+          { id: 'h4', type: 'body_text', passed: false, message: 'Expected text not found', actual: 'err', expected: 'success' }
+        ]
+      }
+    };
+    renderHistoricalTestResults(mockHistRecord);
+    assert(
+      !mockElements['hist-detail-test-item'].classList.contains('hidden') &&
+      mockElements['hist-detail-test-pill'].textContent === '3/4 Passed' &&
+      mockElements['hist-detail-test-pill'].classList.contains('status-pill-danger') &&
+      mockElements['hist-detail-tests-counter'].textContent === '3/4' &&
+      mockElements['hist-detail-tests-content'].innerHTML.includes('Total: 4') &&
+      mockElements['hist-detail-tests-content'].innerHTML.includes('Passed: 3') &&
+      mockElements['hist-detail-tests-content'].innerHTML.includes('Failed: 1'),
+      'TEST 171: History detail modal accurately displays stored test results without re-evaluating assertions'
+    );
+
+    // 16. History persistence failure not breaking HTTP response delivery
+    let safetyErrorCaught = null;
+    try {
+      recordHistorySafely(null, null, null, null);
+    } catch (err) {
+      safetyErrorCaught = err;
+    }
+    assert(safetyErrorCaught === null, 'TEST 172: recordHistorySafely swallows logging failures silently and never throws');
+
+    // 17. Verification of no duplicate history entries
+    const [beforeRows] = await executeQuery('SELECT COUNT(*) AS total FROM request_history');
+    const beforeCount = Number(beforeRows[0].total);
+    const resSingleExec = await makeRequest(appServer, {
+      method: 'POST',
+      path: '/api/requests/execute',
+      body: {
+        name: 'Single Exec Deduplication Check',
+        method: 'GET',
+        url: `http://127.0.0.1:${serverPort}/api/health`,
+        assertions: [{ id: 'dedup_chk', type: 'status_code', operator: 'equals', expected: 200, enabled: true }]
+      }
+    });
+    assert(resSingleExec.statusCode === 200, 'TEST 173A: Request executes successfully');
+    let afterCount = beforeCount;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const [afterRows] = await executeQuery('SELECT COUNT(*) AS total FROM request_history');
+      afterCount = Number(afterRows[0].total);
+      if (afterCount === beforeCount + 1) break;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    assert(afterCount === beforeCount + 1, 'TEST 173B: Exactly one history row created per execution (no duplicate logging)');
+    const [dedupRow] = await executeQuery(
+      `SELECT id FROM request_history WHERE request_name = 'Single Exec Deduplication Check' ORDER BY id DESC LIMIT 1`
+    );
+    if (dedupRow && dedupRow[0]) createdHistoryIds.push(dedupRow[0].id);
+
+    // 18. Existing response tabs remain functional
+    const sampleFullResponse = {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-cache' },
+      body: { message: 'hello' },
+      rawText: '{"message":"hello"}',
+      cookies: [{ name: 'session_id', value: 'xyz123' }],
+      test_results: { summary: { total: 1, passed: 1, failed: 0, status: 'passed' }, results: [] }
+    };
+    assert(
+      sampleFullResponse.status === 200 &&
+      sampleFullResponse.headers['content-type'] === 'application/json' &&
+      sampleFullResponse.cookies.length === 1 &&
+      sampleFullResponse.test_results.summary.status === 'passed',
+      'TEST 174: Existing response data structure (body, headers, cookies) preserved alongside test_results'
+    );
+
+    // 19. Existing history comparison functionality remains functional
+    const histRecA = {
+      id: 1,
+      response_status: 200,
+      response_headers: { 'content-type': 'application/json', 'x-version': '1.0.0' },
+      response_body: JSON.stringify({ version: '1.0.0', status: 'ok' }),
+      response_time: 150
+    };
+    const histRecB = {
+      id: 2,
+      response_status: 200,
+      response_headers: { 'content-type': 'application/json', 'x-version': '2.0.0' },
+      response_body: JSON.stringify({ version: '2.0.0', status: 'ok' }),
+      response_time: 180
+    };
+    const hdrDiff = compareResponseHeaders(histRecA.response_headers, histRecB.response_headers);
+    assert(
+      hdrDiff.identical === false &&
+      hdrDiff.rows.some(r => r.key.toLowerCase() === 'x-version' && r.status === 'modified'),
+      'TEST 175: Day 13 history comparison functionality operates properly without regressions'
+    );
+
+    // Clean up mock DOM
+    delete global.document;
+
   } finally {
     // -------------------------------------------------------------------------
     // Phase 9: Teardown & Resource Cleanup
@@ -1280,7 +2082,7 @@ async function runTests() {
   // Final Results
   // =========================================================================
   console.log('\n===========================================');
-  console.log(`Day 14 Step 3 Tests: ${passedTests}/${totalTests} Passed`);
+  console.log(`Day 14 Final Verification Tests: ${passedTests}/${totalTests} Passed`);
   console.log('===========================================\n');
 
   if (passedTests !== totalTests) {

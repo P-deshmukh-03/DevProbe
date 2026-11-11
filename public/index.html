@@ -374,6 +374,9 @@
               <button class="config-tab" data-tab="auth" role="tab" aria-selected="false" id="tab-btn-auth">
                 Auth <span class="tab-sublabel" id="auth-sublabel">None</span>
               </button>
+              <button class="config-tab" data-tab="tests" role="tab" aria-selected="false" id="tab-btn-tests">
+                Tests <span class="tab-counter" id="tests-count">0</span>
+              </button>
             </nav>
 
             <!-- Configuration Panels Container -->
@@ -560,6 +563,139 @@
                 </div>
               </div>
 
+              <!-- 5. TESTS (ASSERTION BUILDER) PANEL -->
+              <div class="config-panel" id="panel-tests" role="tabpanel" aria-labelledby="tab-btn-tests">
+                <div class="panel-section-header">
+                  <div class="panel-title-group">
+                    <span class="panel-title">Response Assertions & Tests</span>
+                    <span class="panel-subtitle">Define automated assertions to validate response status, latency, headers, or body data.</span>
+                  </div>
+                  <div class="panel-header-actions">
+                    <button id="btn-open-assertion-builder" class="btn-sm btn-outline" type="button">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                      Add Assertion
+                    </button>
+                    <button id="btn-clear-all-assertions" class="btn-sm btn-outline btn-danger-hover hidden" type="button" title="Clear all assertions">
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Assertion Builder Form Card -->
+                <div id="assertion-builder-card" class="assertion-builder-card hidden">
+                  <div class="assertion-builder-header">
+                    <span id="assertion-builder-title" class="builder-title">New Assertion</span>
+                    <button type="button" id="btn-close-assertion-builder" class="btn-icon-close" aria-label="Close builder">&times;</button>
+                  </div>
+
+                  <!-- Hidden field for editing assertion ID -->
+                  <input type="hidden" id="assert-edit-id" value="">
+
+                  <!-- Validation Error Banner -->
+                  <div id="assertion-builder-error" class="validation-banner hidden" role="alert"></div>
+
+                  <div class="assertion-builder-grid">
+                    <!-- 1. Category Selection -->
+                    <div class="form-group">
+                      <label for="assert-type-select" class="form-label">Category</label>
+                      <select id="assert-type-select" class="select-dropdown">
+                        <option value="status_code">HTTP Status Code</option>
+                        <option value="response_time">Response Time (Latency)</option>
+                        <option value="header">Response Header</option>
+                        <option value="body_text">Response Body Text</option>
+                        <option value="json_path">JSON Path</option>
+                      </select>
+                    </div>
+
+                    <!-- 2. Target / Property Field (Header Name or JSON Path) -->
+                    <div class="form-group hidden" id="assert-property-group">
+                      <label for="assert-property-input" class="form-label" id="assert-property-label">Property</label>
+                      <input type="text" id="assert-property-input" class="form-input font-mono" placeholder="" autocomplete="off">
+                      <span class="form-hint" id="assert-property-hint"></span>
+                    </div>
+
+                    <!-- 3. Operator Selection -->
+                    <div class="form-group">
+                      <label for="assert-operator-select" class="form-label">Operator</label>
+                      <select id="assert-operator-select" class="select-dropdown">
+                        <!-- Populated dynamically based on category and sensitive restrictions -->
+                      </select>
+                    </div>
+
+                    <!-- 4. Expected Value Field -->
+                    <div class="form-group" id="assert-expected-group">
+                      <div class="label-with-type">
+                        <label for="assert-expected-input" class="form-label" id="assert-expected-label">Expected Value</label>
+                        <select id="assert-expected-type" class="select-dropdown-mini hidden" title="Select data type for expected value">
+                          <option value="auto">Auto-detect</option>
+                          <option value="string">String</option>
+                          <option value="number">Number</option>
+                          <option value="boolean">Boolean</option>
+                          <option value="null">null</option>
+                        </select>
+                      </div>
+                      <input type="text" id="assert-expected-input" class="form-input" placeholder="e.g. 200" autocomplete="off">
+                      <span class="form-hint" id="assert-expected-hint"></span>
+                    </div>
+                  </div>
+
+                  <!-- Security Warning Notice -->
+                  <div id="assert-security-notice" class="info-callout hidden" style="margin-top: 10px;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    <span id="assert-security-notice-text">Sensitive credentials detected. Value-matching is restricted to prevent storing secrets. Use 'exists' or 'not_exists'.</span>
+                  </div>
+
+                  <!-- Builder Action Buttons -->
+                  <div class="assertion-builder-actions">
+                    <button type="button" id="btn-cancel-assertion" class="btn-sm btn-outline">Cancel</button>
+                    <button type="button" id="btn-save-assertion" class="btn-sm btn-primary">Save Assertion</button>
+                  </div>
+                </div>
+
+                <!-- Empty State Container -->
+                <div id="assertions-empty-state" class="assertions-empty-state">
+                  <div class="empty-icon-wrapper">
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                      <path d="M9 11l3 3L22 4"></path>
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                  </div>
+                  <div class="empty-state-title">No Assertions Configured</div>
+                  <div class="empty-state-desc">Automate your API testing by verifying status codes, response latency, headers, or JSON payload values for this request.</div>
+                  <button type="button" id="btn-add-first-assertion" class="btn-sm btn-primary">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    Add Your First Assertion
+                  </button>
+                </div>
+
+                <!-- Assertions Table / List -->
+                <div id="assertions-list-container" class="table-responsive hidden">
+                  <table class="kv-table assertions-table" id="assertions-table">
+                    <thead>
+                      <tr>
+                        <th class="col-check" title="Enable/Disable assertion"></th>
+                        <th class="col-assert-type">Category</th>
+                        <th class="col-assert-prop">Target / Property</th>
+                        <th class="col-assert-op">Operator</th>
+                        <th class="col-assert-val">Expected Value</th>
+                        <th class="col-assert-actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody id="assertions-tbody">
+                      <!-- Populated dynamically by JS -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
             </div>
           </section>
 
@@ -577,10 +713,17 @@
                 <button class="response-tab" data-tab="res-cookies" role="tab" aria-selected="false" id="res-tab-btn-cookies">
                   Cookies
                 </button>
+                <button class="response-tab" data-tab="res-tests" role="tab" aria-selected="false" id="res-tab-btn-tests">
+                  Test Results <span class="tab-counter test-results-counter hidden" id="res-tests-count">0/0</span>
+                </button>
               </nav>
 
               <!-- Response Summary Metrics -->
               <div class="response-metrics" aria-label="Response Statistics">
+                <div class="metric-item hidden" id="res-tests-metric" title="Assertion Test Results">
+                  <span class="metric-label">Tests:</span>
+                  <span class="metric-badge" id="res-tests-badge">—</span>
+                </div>
                 <div class="metric-item" title="HTTP Status Code">
                   <span class="metric-label">Status:</span>
                   <span class="metric-badge" id="res-status-badge">—</span>
@@ -672,6 +815,18 @@
                 <div class="response-empty-state">
                   <p class="empty-state-desc">No cookies received for this request.</p>
                 </div>
+              </div>
+
+              <!-- Response Test Results Panel (Day 14 Step 5) -->
+              <div class="response-panel" id="panel-res-tests" role="tabpanel">
+                <div class="response-empty-state" id="res-tests-empty-state">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="text-muted" style="margin-bottom: 8px;">
+                    <path d="M9 11l3 3L22 4"></path>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                  </svg>
+                  <p class="empty-state-desc" id="res-tests-empty-desc">No test results available. Configure assertions in the Tests tab and send a request to view automated evaluation results.</p>
+                </div>
+                <div class="test-results-container hidden" id="res-tests-content"></div>
               </div>
 
             </div>
@@ -1041,6 +1196,10 @@
                 <span class="history-meta-label">Executed:</span>
                 <span id="hist-detail-date" class="history-meta-value">-</span>
               </div>
+              <div class="history-meta-item hidden" id="hist-detail-test-item">
+                <span class="history-meta-label">Tests:</span>
+                <span id="hist-detail-test-pill" class="status-pill status-pill-success">Passed</span>
+              </div>
               <span id="hist-detail-truncated-badge" class="history-trunc-badge hidden" title="Response payload exceeded 64 KB storage limit and was truncated">Truncated (64 KB)</span>
             </div>
             <div id="hist-detail-error-row" class="history-detail-error-box hidden">
@@ -1049,10 +1208,11 @@
             </div>
           </div>
 
-          <!-- Tabs for Detail View: Request vs Response -->
+          <!-- Tabs for Detail View: Request vs Response vs Tests -->
           <div class="history-detail-tabs">
             <button type="button" class="history-tab-btn active" id="tab-btn-hist-request" data-target="hist-view-request">Request</button>
             <button type="button" class="history-tab-btn" id="tab-btn-hist-response" data-target="hist-view-response">Response</button>
+            <button type="button" class="history-tab-btn" id="tab-btn-hist-tests" data-target="hist-view-tests">Tests <span class="tab-counter hidden" id="hist-detail-tests-counter">0</span></button>
           </div>
 
           <!-- Request Section -->
@@ -1077,6 +1237,11 @@
               <span class="modal-label">Response Body</span>
               <div id="hist-detail-res-body" class="history-code-view font-mono"></div>
             </div>
+          </div>
+
+          <!-- Tests Section (Day 14 Step 5) -->
+          <div id="hist-view-tests" class="history-tab-content hidden">
+            <div id="hist-detail-tests-content"></div>
           </div>
         </div>
         <div class="modal-footer history-detail-footer">
