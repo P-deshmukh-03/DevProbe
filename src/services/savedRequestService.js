@@ -96,6 +96,7 @@ function formatSavedRequest(row) {
     id: row.id,
     collection_id: row.collection_id !== null ? Number(row.collection_id) : null,
     name: row.name,
+    description: row.description !== null && row.description !== undefined ? String(row.description) : null,
     method: row.method,
     url: row.url,
     headers: parseJsonColumn(row.headers),
@@ -118,7 +119,7 @@ function formatSavedRequest(row) {
  */
 async function getSavedRequests({ collectionId } = {}) {
   try {
-    let sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests';
+    let sql = 'SELECT id, collection_id, name, description, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests';
     const params = [];
 
     if (collectionId !== undefined && collectionId !== null && collectionId !== '') {
@@ -153,7 +154,7 @@ async function getSavedRequestById(id) {
   }
 
   try {
-    const sql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const sql = 'SELECT id, collection_id, name, description, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(sql, [numericId]);
 
     if (!rows || rows.length === 0) {
@@ -177,6 +178,7 @@ async function getSavedRequestById(id) {
 async function createSavedRequest(payload = {}) {
   const {
     name,
+    description,
     method,
     url,
     collection_id,
@@ -202,6 +204,16 @@ async function createSavedRequest(payload = {}) {
   }
   if (trimmedName.length > 255) {
     throw new AppError('Request name cannot exceed 255 characters', 400, 'VALIDATION_ERROR', null, 'name');
+  }
+
+  // 1b. Validate request description (optional)
+  let safeDescription = null;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string') {
+      throw new AppError('Request description must be a string if provided', 400, 'VALIDATION_ERROR', null, 'description');
+    }
+    const trimmedDesc = description.trim();
+    safeDescription = trimmedDesc.length > 0 ? trimmedDesc : null;
   }
 
   // 2. Validate HTTP method
@@ -302,13 +314,14 @@ async function createSavedRequest(payload = {}) {
   try {
     const insertSql = `
       INSERT INTO saved_requests (
-        collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        collection_id, name, description, method, url, headers, params, body, body_type, auth_type, assertions
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [result] = await executeQuery(insertSql, [
       safeCollectionId,
       trimmedName,
+      safeDescription,
       normalizedMethod,
       trimmedUrl,
       jsonHeaders,
@@ -320,7 +333,7 @@ async function createSavedRequest(payload = {}) {
     ]);
 
     const createdId = result.insertId;
-    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const fetchSql = 'SELECT id, collection_id, name, description, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(fetchSql, [createdId]);
 
     return formatSavedRequest(rows[0]);
@@ -346,6 +359,7 @@ async function updateSavedRequest(id, payload = {}) {
 
   const {
     name,
+    description,
     method,
     url,
     collection_id,
@@ -421,6 +435,21 @@ async function updateSavedRequest(id, payload = {}) {
   // 4. Verify that the saved request exists (throws 404 if missing)
   const existingRecord = await getSavedRequestById(numericId);
 
+  // 4b. Validate and resolve request description (optional)
+  let safeDescription;
+  if (description !== undefined) {
+    if (description === null) {
+      safeDescription = null;
+    } else if (typeof description !== 'string') {
+      throw new AppError('Request description must be a string if provided', 400, 'VALIDATION_ERROR', null, 'description');
+    } else {
+      const trimmedDesc = description.trim();
+      safeDescription = trimmedDesc.length > 0 ? trimmedDesc : null;
+    }
+  } else {
+    safeDescription = existingRecord.description || null;
+  }
+
   // 5. Validate collection ID and existence if provided
   const targetColId = collection_id !== undefined ? collection_id : collectionId;
   let safeCollectionId = null;
@@ -486,6 +515,7 @@ async function updateSavedRequest(id, payload = {}) {
       UPDATE saved_requests SET
         collection_id = ?,
         name = ?,
+        description = ?,
         method = ?,
         url = ?,
         headers = ?,
@@ -500,6 +530,7 @@ async function updateSavedRequest(id, payload = {}) {
     await executeQuery(updateSql, [
       safeCollectionId,
       trimmedName,
+      safeDescription,
       normalizedMethod,
       trimmedUrl,
       jsonHeaders,
@@ -511,7 +542,7 @@ async function updateSavedRequest(id, payload = {}) {
       numericId
     ]);
 
-    const fetchSql = 'SELECT id, collection_id, name, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
+    const fetchSql = 'SELECT id, collection_id, name, description, method, url, headers, params, body, body_type, auth_type, assertions, created_at, updated_at FROM saved_requests WHERE id = ?';
     const [rows] = await executeQuery(fetchSql, [numericId]);
 
     return formatSavedRequest(rows[0]);

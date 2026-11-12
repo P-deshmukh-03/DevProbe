@@ -111,6 +111,18 @@ async function applyMigrations(connection, databaseName) {
   } else {
     console.log('✓ Column `request_history.test_results` already present.');
   }
+
+  // Day 15 Migration 1: Add description TEXT NULL to saved_requests if missing
+  const hasDescription = await columnExists('saved_requests', 'description');
+  if (!hasDescription) {
+    console.log('Applying Day 15 migration: adding `description` column to `saved_requests`...');
+    await connection.query(
+      'ALTER TABLE `saved_requests` ADD COLUMN `description` TEXT NULL AFTER `name`;'
+    );
+    console.log('✓ Added `description` column to `saved_requests`.');
+  } else {
+    console.log('✓ Column `saved_requests.description` already present.');
+  }
 }
 
 // Execute if run directly from command line

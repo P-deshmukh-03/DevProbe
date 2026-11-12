@@ -293,6 +293,7 @@ function resolveEntireRequest(req, envKey = 'none') {
 const activeRequest = {
   id: 'req-1',
   name: 'Get User Profile',
+  description: '',
   method: 'GET',
   url: 'https://jsonplaceholder.typicode.com/users/1',
   params: [
@@ -826,6 +827,7 @@ function loadRequestIntoState(template) {
   if (!template) return;
 
   activeRequest.name = template.name || 'Untitled Request';
+  activeRequest.description = template.description || '';
   activeRequest.method = template.method || 'GET';
   activeRequest.url = template.url || '';
 
@@ -2838,6 +2840,7 @@ function openEditSavedRequestModal(req) {
   const modal = document.getElementById('modal-edit-saved-request');
   const inputId = document.getElementById('input-edit-req-id');
   const inputName = document.getElementById('input-edit-req-name');
+  const inputDesc = document.getElementById('input-edit-req-desc');
   const selectCol = document.getElementById('select-edit-req-collection');
   const selectMethod = document.getElementById('select-edit-req-method');
   const inputUrl = document.getElementById('input-edit-req-url');
@@ -2846,6 +2849,7 @@ function openEditSavedRequestModal(req) {
   if (modal && inputId && inputName && inputUrl) {
     inputId.value = req.id;
     inputName.value = req.name || '';
+    if (inputDesc) inputDesc.value = req.description || '';
     if (selectCol) selectCol.value = req.collection_id !== null && req.collection_id !== undefined ? String(req.collection_id) : '';
     if (selectMethod) selectMethod.value = req.method || 'GET';
     inputUrl.value = req.url || '';
@@ -2985,6 +2989,7 @@ function convertSavedRequestToTemplate(savedReq) {
 
   return {
     name: savedReq.name || 'Saved Request',
+    description: savedReq.description || '',
     method: savedReq.method || 'GET',
     url: savedReq.url || '',
     headers: headers.length > 0 ? headers : [{ id: generateRowId('hdr'), key: 'Accept', value: 'application/json', description: 'Expected format', enabled: true }],
@@ -3350,12 +3355,14 @@ function initPersistentCollections() {
   const btnSaveCancel = document.getElementById('btn-save-modal-cancel');
   const formSave = document.getElementById('form-save-request');
   const inputSaveName = document.getElementById('input-save-name');
+  const inputSaveDesc = document.getElementById('input-save-desc');
   const selectSaveCol = document.getElementById('select-save-collection');
   const btnSaveSubmit = document.getElementById('btn-save-modal-submit');
 
   const openSaveModal = () => {
     if (modalSave) {
       if (inputSaveName) inputSaveName.value = activeRequest.name || 'My Request';
+      if (inputSaveDesc) inputSaveDesc.value = activeRequest.description || '';
       modalSave.classList.add('active');
       if (inputSaveName) inputSaveName.focus();
     }
@@ -3376,6 +3383,7 @@ function initPersistentCollections() {
     formSave.addEventListener('submit', async (e) => {
       e.preventDefault();
       const reqName = (inputSaveName?.value || '').trim();
+      const reqDesc = (inputSaveDesc?.value || '').trim();
       const colIdVal = selectSaveCol?.value;
       const collection_id = colIdVal ? parseInt(colIdVal, 10) : null;
 
@@ -3388,6 +3396,7 @@ function initPersistentCollections() {
 
       const payload = {
         name: reqName,
+        description: reqDesc || null,
         collection_id: collection_id,
         method: activeRequest.method || 'GET',
         url: activeRequest.url || '',
@@ -3409,6 +3418,7 @@ function initPersistentCollections() {
 
         if (res.status === 201 && data.success) {
           activeRequest.name = reqName;
+          activeRequest.description = reqDesc;
           const tabTitle = document.getElementById('tab-title-label');
           if (tabTitle) tabTitle.textContent = reqName;
 
@@ -3434,6 +3444,7 @@ function initPersistentCollections() {
   const formEditReq = document.getElementById('form-edit-saved-request');
   const inputEditReqId = document.getElementById('input-edit-req-id');
   const inputEditReqName = document.getElementById('input-edit-req-name');
+  const inputEditReqDesc = document.getElementById('input-edit-req-desc');
   const selectEditReqCol = document.getElementById('select-edit-req-collection');
   const selectEditReqMethod = document.getElementById('select-edit-req-method');
   const inputEditReqUrl = document.getElementById('input-edit-req-url');
@@ -3452,6 +3463,7 @@ function initPersistentCollections() {
       e.preventDefault();
       const id = inputEditReqId?.value;
       const reqName = (inputEditReqName?.value || '').trim();
+      const reqDesc = (inputEditReqDesc?.value || '').trim();
       const colIdVal = selectEditReqCol?.value;
       const collection_id = colIdVal ? parseInt(colIdVal, 10) : null;
       const method = selectEditReqMethod?.value || 'GET';
@@ -3489,6 +3501,7 @@ function initPersistentCollections() {
 
       const payload = {
         name: reqName,
+        description: reqDesc || null,
         collection_id,
         method,
         url,
@@ -3509,9 +3522,10 @@ function initPersistentCollections() {
         const data = await res.json();
 
         if (res.status === 200 && data.success) {
-          // If the edited request is the currently loaded request, update activeRequest name
+          // If the edited request is the currently loaded request, update activeRequest name & description
           if (activeRequest.id === `saved-${id}` || activeRequest.name === existingReq?.name) {
             activeRequest.name = reqName;
+            activeRequest.description = reqDesc;
             const tabTitle = document.getElementById('tab-title-label');
             if (tabTitle) tabTitle.textContent = reqName;
           }

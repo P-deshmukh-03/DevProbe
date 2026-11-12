@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `saved_requests` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `collection_id` INT UNSIGNED NULL,
   `name` VARCHAR(255) NOT NULL,
+  `description` TEXT NULL,
   `method` VARCHAR(10) NOT NULL,
   `url` TEXT NOT NULL,
   `headers` JSON NULL,
