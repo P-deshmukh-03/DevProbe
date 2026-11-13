@@ -19,7 +19,7 @@ The project provides a simple, developer-friendly workspace for configuring, tes
 
 ## 📅 Current Development Status
 
-**Day 14 of 16 — Automated API Response Assertion & Testing Engine**
+**Day 15 of 16 — API Documentation Generator & Collection Import/Export**
 
 Completed Milestones:
 - **Day 1**: Project setup, initial Express server, health-check endpoint, and Git integration.
@@ -36,6 +36,7 @@ Completed Milestones:
 - **Day 12**: Complete Postman-style environment management: relational MySQL schema (`environments`, `environment_variables`) with `ON DELETE CASCADE`, AES-256-GCM secret encryption at rest via dedicated `DEVPROBE_ENCRYPTION_KEY`, API response secret masking (`••••••••`), secret preservation on update, atomic environment activation/deactivation, dynamic variable resolution across URLs, query params, headers, body, and auth on cloned execution payloads, SSRF integration blocking resolved loopback/metadata targets, dark-theme Environment Manager modal, and Quick View popover.
 - **Day 13**: Request execution history persistence and response comparison engine: relational MySQL schema (`request_history`), non-blocking fire-and-forget execution recording for both successful and failed outbound requests, multi-tier sanitization and redaction (Basic auth, query secrets, Authorization, Cookie, Set-Cookie, passwords, tokens), hard 64 KB response body storage cap with truncation flag, RESTful History API (`GET`/`DELETE /api/history`, `GET`/`DELETE /api/history/:id`), dynamic History sidebar with pagination, History Detail inspection modal, workspace loading, single and clear-all deletion, and side-by-side Response Comparison with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards.
 - **Day 14**: Automated API response testing and declarative assertion evaluation engine: schema migrations adding `saved_requests.assertions` JSON column and `request_history.test_results` JSON column; centralized backend validation service (`assertionService`) supporting 5 assertion categories (`status_code`, `response_time`, `header`, `body_text`, `json_path`) with strict operator and prototype-pollution enforcement; client-side assertion evaluation engine (`public/js/assertionEngine.js`) executing across browser and Node environments with 100% declarative safety (no eval/Function), credential redaction (`[REDACTED]`), and fault isolation; interactive Assertion Builder UI in request editor with live count badge, category-specific fields, and sensitive property existence restriction; live Test Results panel in response inspector with PASS/FAIL counters, status banners, individual cards, and expected/actual comparison rows; non-blocking execution recording of `test_results` in `request_history`; historical test results display in History Detail Modal without re-evaluation; and 183 automated verification tests with zero regressions.
+- **Day 15**: API documentation generation and collection import/export engine: schema migration adding `saved_requests.description` TEXT NULL column with backward compatibility; centralized collection transfer service (`collectionTransferService`) with standardized `devprobe/v1` JSON export, strict SemVer 1.x version enforcement, collection constraints ($\le 100$ requests), URL credential prohibition, and atomic transactions with rollback protection; API documentation generator service (`documentationService`) creating structured GitHub-Flavored Markdown and standalone responsive HTML5 documents with dark/light mode, embedded CSS, copy actions, and cURL snippets; historical execution sample response matching; RESTful Transfer & Docs APIs (`POST /api/collections/import`, `GET /api/collections/:id/export`, `GET /api/collections/:id/docs/markdown`, `GET /api/collections/:id/docs/html`); interactive frontend Collection Import Modal with dual drag-drop and paste modes, client-side validation, and live preview; sidebar collection action buttons for instantaneous JSON export; API Documentation Modal with zero-script iframe sandboxing (`sandbox=""`), raw Markdown and HTML tabs, copy-to-clipboard, and direct file downloads; and 490 automated verification tests with zero regressions.
 
 ## ✨ Features
 
@@ -49,9 +50,9 @@ Completed Milestones:
 - [x] **Request Execution History & Audit Trail** — Non-blocking recording of successful and failed outbound API executions in relational MySQL (`request_history`), pagination, 64 KB storage caps, and multi-tier credential sanitization (Day 13).
 - [x] **Side-by-Side Response Comparison** — Developer comparison engine comparing two saved history executions side-by-side with delta summary, case-insensitive header matching, LCS line-by-line diffing for JSON/plain-text, and truncation safeguards (Day 13).
 - [x] **Automated API Response Testing** — Automated declarative response testing across status codes, response latencies, response headers, body text, and JSON paths with builder UI and inspector results panel (Day 14).
-- [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces.
-- [ ] **API Documentation Generator** — Generate shareable documentation from saved requests.
-- [ ] **Import / Export** — Import and export Postman / OpenAPI collections.
+- [x] **Collection Import / Export** — Import and export complete request collections using standardized `devprobe/v1` JSON with strict schema validation, SemVer 1.x versioning, and zero credential leakage (Day 15).
+- [x] **API Documentation Generator** — Generate shareable, structured GitHub-Flavored Markdown and standalone responsive HTML5 documentation with embedded CSS, light/dark themes, and cURL snippets (Day 15).
+- [ ] **User Authentication & Workspaces** — Multi-user authentication and private workspaces (Day 16).
 
 ## 📁 Project Structure
 
@@ -93,6 +94,8 @@ DevProbe/
 │   └── services/
 │       ├── assertionService.js     # Assertion validation, category operator rules, prototype-pollution guards & test results sanitization
 │       ├── collectionService.js    # Collection persistence & safe deletion service
+│       ├── collectionTransferService.js # Collection import/export service, devprobe/v1 JSON validation, & atomic transactions
+│       ├── documentationService.js # API documentation generator (Markdown & HTML5), cURL snippet builder, & sample response matching
 │       ├── environmentService.js   # Environment & variable CRUD, AES-256-GCM encryption, & masking service
 │       ├── historyService.js       # Execution recording, multi-tier redaction, 64 KB truncation, & pagination service
 │       ├── requestService.js       # Real execution engine, DNS pinning, & normalization service
@@ -100,9 +103,9 @@ DevProbe/
 │
 ├── test-day3.js                    # Day 3 automated verification test suite (34 tests)
 ├── test-day4.js                    # Day 4 automated verification test suite (67 tests)
-├── test-day5.js                    # Day 5 automated verification test suite (68 tests)
-├── test-day6.js                    # Day 6 automated verification test suite (118 tests)
-├── test-day7.js                    # Day 7 automated verification test suite (63 tests)
+├── test-day5.js                    # Day 5 automated verification test suite (80 tests)
+├── test-day6.js                    # Day 6 automated verification test suite (96 tests)
+├── test-day7.js                    # Day 7 automated verification test suite (118 tests)
 ├── test-day8.js                    # Day 8 automated verification test suite (71 tests)
 ├── test-day9.js                    # Day 9 automated database integration test suite (61 tests)
 ├── test-day10.js                   # Day 10 automated persistence test suite (88 tests)
@@ -110,6 +113,7 @@ DevProbe/
 ├── test-day12.js                   # Day 12 automated environment management test suite (101 tests)
 ├── test-day13.js                   # Day 13 automated history & comparison test suite (274 tests)
 ├── test-day14.js                   # Day 14 automated response assertions & testing test suite (183 tests)
+├── test-day15.js                   # Day 15 automated documentation & collection transfer test suite (490 tests)
 ├── .env                            # Local environment configuration
 ├── .env.example                    # Environment configuration template
 ├── .gitignore                      # Git ignored files & directories
@@ -893,6 +897,162 @@ A declarative status code assertion definition:
 }
 ```
 
+---
+
+## 📖 Day 15: API Documentation Generator & Collection Import/Export
+
+Day 15 introduces comprehensive API documentation generation from saved requests and enterprise-grade collection import/export workflows with strict security isolation, schema validation, and zero credential leakage.
+
+### 1. Overview
+DevProbe allows teams to export collections into standardized JSON files, import them seamlessly across workspaces, and generate publishable API documentation in both GitHub-Flavored Markdown and standalone responsive HTML5 formats.
+
+Key capabilities:
+- **Request Description Support**: Enriched saved requests with Markdown descriptions persisted in MySQL (`saved_requests.description`).
+- **Standardized Export Format (`devprobe/v1`)**: Portable JSON collection format capturing collection metadata, request definitions, query parameters, headers, bodies, authentication schemes, and response assertions.
+- **Strict Schema Validation & SemVer 1.x**: Client and server validation engines enforcing schema integrity, SemVer 1.x version constraints, and request boundaries ($\le 100$ requests per collection).
+- **Proactive Credential Protection**: Guaranteed zero leakage of sensitive authorization tokens, session cookies, host-encrypted variables (`enc:v1:`), and embedded URL credentials during export and documentation generation.
+- **API Documentation Generation**:
+  - **GitHub-Flavored Markdown**: Table of contents, endpoint badges, structured parameter/header tables, request bodies, assertions, sample historical responses, and shell-escaped cURL examples.
+  - **Standalone HTML5 Document**: Modern responsive layout, dark/light theme switching based on system preferences, embedded CSS (zero external dependencies), collapsible sections, copy-to-clipboard buttons, and contract assertion tables.
+- **Interactive Workspace UI**:
+  - **Collection Import Modal**: Dual input methods (drag-and-drop file upload and raw JSON paste), client-side validation, live preview card with request counter, and error reporting.
+  - **Folder Action Controls**: Direct "Export" and "View Documentation" action buttons integrated into sidebar collection rows.
+  - **Documentation Viewer Dialog**: Tabbed preview featuring a sandboxed iframe (`sandbox=""`), raw Markdown/HTML viewers, instant clipboard copy actions, and direct file downloads.
+
+### 2. Supported Export Formats
+| Format | MIME Type | File Extension | Description |
+|---|---|---|---|
+| **DevProbe Collection JSON** | `application/json` | `.json` | Standardized `devprobe/v1` format containing complete collection metadata, requests, headers, params, body, and assertions. |
+| **GitHub-Flavored Markdown** | `text/markdown` | `.md` | Structured documentation suitable for GitHub wikis, repository READMEs, and technical documentation portals. |
+| **Standalone HTML5 Document** | `text/html` | `.html` | Self-contained, styled HTML5 documentation with embedded responsive CSS, dark/light theme support, and cURL snippets. |
+
+### 3. API Endpoints Reference
+
+#### A. Export Collection
+- **Endpoint**: `GET /api/collections/:id/export`
+- **Query Parameters**:
+  - `download` (optional, boolean): Set to `false` for inline JSON response (default: `true`).
+  - `inline` (optional, boolean): Set to `true` for inline viewing in browser.
+- **Headers Returned**:
+  - `Content-Type: application/json; charset=utf-8`
+  - `Content-Disposition: attachment; filename="<Collection_Name>.json"; filename*=UTF-8''<Encoded_Name>.json`
+- **Response**: Standardized `devprobe/v1` JSON bundle.
+
+#### B. Import Collection
+- **Endpoint**: `POST /api/collections/import`
+- **Headers Required**: `Content-Type: application/json`
+- **Payload**: `devprobe/v1` JSON envelope:
+  ```json
+  {
+    "schema": "devprobe/v1",
+    "version": "1.0.0",
+    "collection": {
+      "name": "User Management API",
+      "description": "Endpoints for managing users and roles",
+      "requests": [
+        {
+          "name": "List Users",
+          "description": "Returns paginated list of users",
+          "method": "GET",
+          "url": "https://api.example.com/v1/users",
+          "headers": [{ "key": "Accept", "value": "application/json", "enabled": true }],
+          "params": [{ "key": "page", "value": "1", "enabled": true }],
+          "body": "",
+          "body_type": "none",
+          "auth_type": "none",
+          "assertions": [
+            { "id": "as_1", "type": "status_code", "operator": "equals", "expected": 200, "enabled": true }
+          ]
+        }
+      ]
+    }
+  }
+  ```
+- **Status Codes**:
+  - `201 Created`: Collection imported successfully.
+  - `400 Bad Request`: Schema validation failure, unsupported version, embedded URL credentials, or malformed JSON.
+  - `500 Internal Server Error`: Transaction rolled back automatically on database failure.
+
+#### C. Get Collection Markdown Documentation
+- **Endpoint**: `GET /api/collections/:id/docs/markdown`
+- **Query Parameters**: `download=false` / `inline=true` for inline viewing.
+- **Headers Returned**:
+  - `Content-Type: text/markdown; charset=utf-8`
+  - `Content-Disposition: attachment; filename="<Collection_Name>.md"`
+- **Response**: Complete Markdown documentation text.
+
+#### D. Get Collection HTML Documentation
+- **Endpoint**: `GET /api/collections/:id/docs/html`
+- **Query Parameters**: `download=false` / `inline=true` for inline viewing.
+- **Headers Returned**:
+  - `Content-Type: text/html; charset=utf-8`
+  - `Content-Disposition: attachment; filename="<Collection_Name>.html"`
+- **Response**: Complete standalone HTML5 document.
+
+### 4. Step-by-Step User Guides
+
+#### How to Import a Collection
+1. In the sidebar under **Collections**, click the **Import Collection** button (download icon next to `+`).
+2. The **Import Collection** modal opens:
+   - **File Upload Tab**: Drag and drop a `.json` collection file onto the dropzone or click to browse.
+   - **Paste JSON Tab**: Paste raw JSON directly into the textarea.
+3. DevProbe instantly validates the payload:
+   - If valid, a green preview card appears with the collection name, description, request count, and `devprobe/v1` badge.
+   - If invalid, an alert displays the exact validation error (e.g., unsupported schema, SemVer violation, or embedded credentials).
+4. Click **Import Collection**. The collection and all its requests are imported atomically via MySQL transaction and appear in the sidebar.
+
+#### How to Export a Collection
+1. In the sidebar, hover over any collection row to reveal the action buttons.
+2. Click the **Export Collection** button (tray-arrow icon).
+3. DevProbe generates the `devprobe/v1` JSON bundle with sanitized headers, stripped tokens, and normalized requests.
+4. Your browser automatically downloads `<Collection_Name>.json`.
+
+#### How to Generate and View API Documentation
+1. In the sidebar, hover over any collection row and click the **View Documentation** button (document icon).
+2. The **API Documentation** dialog opens, displaying the collection title and loading indicator while documentation builds.
+3. Explore the documentation across three tabs:
+   - **Formatted Preview**: Visual HTML preview rendered in an isolated sandbox (`sandbox=""`) with endpoint sections, tables, response status, and copy cURL snippets.
+   - **Raw Markdown**: Full GitHub-Flavored Markdown source with syntax-highlighted code blocks.
+   - **Raw HTML**: Complete HTML5 document source code.
+4. Use the toolbar actions:
+   - **Copy MD**: Copies the Markdown documentation directly to your clipboard.
+   - **Copy HTML**: Copies the HTML source code to your clipboard.
+   - **Download MD**: Downloads the `.md` file to your computer.
+   - **Download HTML**: Downloads the `.html` file to your computer.
+
+### 5. Security & Credential Redaction Policy
+
+DevProbe implements a strict, multi-tiered credential protection taxonomy during import, export, and documentation generation:
+
+1. **Reliably Detectable Credentials (Strictly Redacted & Omitted)**:
+   - **URL Authority Credentials**: Embedded `user:password@` in URLs are stripped via RFC 3986 URL parser before export, documentation, or cURL generation.
+   - **Standard Sensitive Headers**: Headers matching `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `X-Auth-Token`, etc., are completely stripped from exported collections and omitted from documentation cURL snippets and header tables.
+   - **Host-Encrypted Variables**: AES-256-GCM tokens with `enc:v1:` signatures are host-specific secrets tied to local encryption keys. They are redacted to `[REDACTED_SECRET]` in cURL snippets, request bodies, and sample responses.
+2. **Arbitrary Application Data Preservation**:
+   - Legitimate schema fields named `"password"`, `"token"`, or `"secret"` in request bodies (such as OAuth login endpoints) and template variables (`{{password}}`) are preserved without destructive keyword-based search-and-replace that would corrupt valid API structures.
+3. **Frontend Sandboxing & XSS Defense**:
+   - The documentation preview iframe in `#modal-api-docs` strictly enforces `sandbox=""`, blocking all script execution, popups, and parent DOM navigation.
+   - All user-controlled metadata (names, descriptions, error text) in previews and alerts is assigned via `textContent`.
+   - HTML documentation generator uses `escapeHtml()` with character entity encoding (`&`, `<`, `>`, `"`, `'`) and explicit blocking of `javascript:` and `vbscript:` URI protocols.
+4. **Transactional Database Integrity**:
+   - Batch imports use MySQL transactions (`START TRANSACTION`, `COMMIT`, `ROLLBACK`) with pool connection release in `finally` blocks. If any request fails validation or insert, all changes are rolled back automatically with zero orphan records.
+
+### 6. Testing Instructions
+Run the automated test suites using Node.js:
+```powershell
+# Day 15 API Documentation & Collection Transfer Suite (490 tests)
+node test-day15.js
+
+# Day 14 Automated Response Assertions & Testing Suite (183 tests)
+node test-day14.js
+
+# Day 13 History & Comparison Suite (274 tests)
+node test-day13.js
+
+# Full Regression Suite (Days 3-12 — 799 tests)
+npm test
+```
+
 ### Database Troubleshooting
 
 | Error Code | Meaning | Solution |
@@ -916,7 +1076,8 @@ A declarative status code assertion definition:
 | Day 12 | Environment management & dynamic variable resolution (AES-256-GCM, modals) | Completed |
 | Day 13 | Request execution history, audit trail & side-by-side response comparison | Completed |
 | Day 14 | Automated API response testing & assertion evaluation engine | Completed |
-| Days 15–16 | User authentication, private workspaces, documentation generator, & final deployment | Planned |
+| Day 15 | API documentation generator & collection import/export (JSON, Markdown, HTML) | Completed |
+| Day 16 | User authentication, private workspaces & final production deployment | Planned |
 
 ## 👨‍💻 Developer
 
@@ -925,4 +1086,4 @@ MCA Student | Full-Stack Development Enthusiast
 
 ## 📌 Project Status
 
-**In Active Development** — Day 14 complete. Automated API response testing, declarative assertion evaluation engine, Assertion Builder UI, real-time response inspector results panel, and non-blocking MySQL test result persistence fully implemented. Comprehensive verification confirmed across status codes, latencies, response headers, body text, and nested JSON paths with strict credential redaction (`[REDACTED]`), prototype-pollution prevention, and workspace isolation. All 1,211 automated tests (754 regression + 274 Day 13 + 183 Day 14) passing with 100% pass rate and zero regressions.
+**In Active Development** — Day 15 complete. API documentation generator and collection transfer engine fully implemented. Supports standardized `devprobe/v1` JSON export, SemVer 1.x schema validation, atomic MySQL transaction rollback, Gfm Markdown and standalone responsive HTML5 document generation with dark/light themes and cURL snippets, zero-script iframe preview sandboxing (`sandbox=""`), multi-tier credential sanitization, request descriptions, and interactive Collection Import/Docs modals. All 1,746 automated tests (799 regression + 274 Day 13 + 183 Day 14 + 490 Day 15) passing with 100% pass rate and zero regressions.

@@ -47,12 +47,33 @@ const {
   getLatestSampleResponse,
   getSampleResponsesForRequests,
   generateCollectionMarkdown,
-  generateCollectionHtml
+  generateCollectionHtml,
+  getCollectionMarkdown,
+  getCollectionHtml
 } = documentationService;
+const { buildContentDisposition } = require('./src/controllers/collectionController');
 const {
   activeRequest,
   loadRequestIntoState,
-  convertSavedRequestToTemplate
+  convertSavedRequestToTemplate,
+  downloadFile,
+  parseAndValidateImportJson,
+  openImportCollectionModal,
+  closeImportCollectionModal,
+  resetImportModalState,
+  switchImportTab,
+  updateImportPreview,
+  initCollectionImport,
+  exportCollectionToJson,
+  openApiDocsModal,
+  closeApiDocsModal,
+  switchDocsTab,
+  initApiDocsModal,
+  getActiveImportPayload,
+  setActiveImportPayload,
+  getActiveDocsCollection,
+  getCachedMarkdownDoc,
+  getCachedHtmlDoc
 } = require('./public/js/app');
 const { AppError } = require('./src/middleware/errorHandler');
 
@@ -2412,6 +2433,708 @@ async function runTests() {
     const verifyDeleted = await collectionService.getCollectionById(crudColId);
     assert(verifyDeleted === null, 'Deleted collection no longer exists in database');
 
+    // -------------------------------------------------------------
+    // Section 14: Frontend UI Integration Verification (Step 5)
+    // -------------------------------------------------------------
+    console.log('\n[SECTION 14] Frontend UI Integration Verification (Step 5)');
+
+    // 14.1 Verify index.html Markup for Import & Documentation Modals
+    const appHtmlPath = path.join(__dirname, 'public', 'index.html');
+    assert(fs.existsSync(appHtmlPath), 'public/index.html file exists');
+    const indexHtml = fs.readFileSync(appHtmlPath, 'utf8');
+
+    // Sidebar actions & import button
+    assert(indexHtml.includes('class="sidebar-actions"'), 'Sidebar contains .sidebar-actions wrapper');
+    assert(indexHtml.includes('id="btn-import-collection"'), 'Sidebar contains #btn-import-collection button');
+    assert(/title="Import [cC]ollection from JSON"/i.test(indexHtml), '#btn-import-collection has descriptive title attribute');
+
+    // Collection Import Modal markup
+    assert(indexHtml.includes('id="modal-import-collection"'), 'Document contains #modal-import-collection');
+    assert(indexHtml.includes('id="tab-btn-import-file"'), 'Import modal contains file tab button #tab-btn-import-file');
+    assert(indexHtml.includes('id="tab-btn-import-paste"'), 'Import modal contains paste tab button #tab-btn-import-paste');
+    assert(indexHtml.includes('id="import-dropzone"'), 'Import modal contains drag-and-drop dropzone #import-dropzone');
+    assert(indexHtml.includes('id="input-import-file"'), 'Import modal contains hidden file input #input-import-file');
+    assert(indexHtml.includes('accept=".json,application/json"'), 'File input strictly accepts .json and application/json');
+    assert(indexHtml.includes('id="import-file-info"'), 'Import modal contains #import-file-info card');
+    assert(indexHtml.includes('id="btn-import-file-remove"'), 'Import modal contains remove file button #btn-import-file-remove');
+    assert(indexHtml.includes('id="pane-import-paste"'), 'Import modal contains #pane-import-paste');
+    assert(indexHtml.includes('id="input-import-json"'), 'Import modal contains JSON textarea #input-import-json');
+    assert(indexHtml.includes('id="import-preview-box"'), 'Import modal contains #import-preview-box');
+    assert(indexHtml.includes('id="import-preview-name"'), 'Import preview displays #import-preview-name');
+    assert(indexHtml.includes('id="import-preview-count"'), 'Import preview displays #import-preview-count');
+    assert(indexHtml.includes('id="import-preview-desc"'), 'Import preview displays #import-preview-desc');
+    assert(indexHtml.includes('id="import-preview-badge"'), 'Import preview displays #import-preview-badge');
+    assert(indexHtml.includes('id="import-error-box"'), 'Import modal contains safe #import-error-box');
+    assert(indexHtml.includes('id="import-error-text"'), 'Import error box contains #import-error-text');
+    assert(indexHtml.includes('id="btn-import-col-confirm"'), 'Import modal contains confirm button #btn-import-col-confirm');
+
+    // API Documentation Modal markup
+    assert(indexHtml.includes('id="modal-api-docs"'), 'Document contains #modal-api-docs');
+    assert(indexHtml.includes('id="docs-modal-heading"'), 'API docs modal contains dynamic heading #docs-modal-heading');
+    assert(indexHtml.includes('id="btn-docs-tab-preview"'), 'API docs modal contains preview tab button #btn-docs-tab-preview');
+    assert(indexHtml.includes('id="btn-docs-tab-markdown"'), 'API docs modal contains markdown tab button #btn-docs-tab-markdown');
+    assert(indexHtml.includes('id="btn-docs-tab-html"'), 'API docs modal contains HTML tab button #btn-docs-tab-html');
+    assert(indexHtml.includes('id="btn-docs-copy-md"'), 'API docs toolbar contains copy markdown button #btn-docs-copy-md');
+    assert(indexHtml.includes('id="btn-docs-copy-html"'), 'API docs toolbar contains copy HTML button #btn-docs-copy-html');
+    assert(indexHtml.includes('id="btn-docs-download-md"'), 'API docs toolbar contains download markdown button #btn-docs-download-md');
+    assert(indexHtml.includes('id="btn-docs-download-html"'), 'API docs toolbar contains download HTML button #btn-docs-download-html');
+    assert(indexHtml.includes('id="docs-loading-state"'), 'API docs modal contains dedicated loading state #docs-loading-state');
+    assert(indexHtml.includes('id="docs-error-state"'), 'API docs modal contains dedicated error state #docs-error-state');
+    assert(indexHtml.includes('id="docs-error-text"'), 'API docs modal contains error message element #docs-error-text');
+
+    // Sandboxed iframe verification
+    assert(indexHtml.includes('id="docs-preview-iframe"'), 'API docs modal contains #docs-preview-iframe');
+    assert(
+      /id="docs-preview-iframe"[^>]*sandbox=""/i.test(indexHtml) || /sandbox=""[^>]*id="docs-preview-iframe"/i.test(indexHtml),
+      '#docs-preview-iframe strictly enforces sandbox="" attribute for zero-script isolation'
+    );
+    assert(indexHtml.includes('id="docs-markdown-source"'), 'API docs modal contains raw markdown viewer #docs-markdown-source');
+    assert(indexHtml.includes('id="docs-html-source"'), 'API docs modal contains raw HTML viewer #docs-html-source');
+
+    // 14.2 Verify style.css Stylesheet Rules
+    const appCssPath = path.join(__dirname, 'public', 'css', 'style.css');
+    assert(fs.existsSync(appCssPath), 'public/css/style.css file exists');
+    const appCss = fs.readFileSync(appCssPath, 'utf8');
+
+    assert(appCss.includes('.sidebar-actions'), 'CSS contains .sidebar-actions styles');
+    assert(appCss.includes('.import-dropzone'), 'CSS contains .import-dropzone styles');
+    assert(appCss.includes('.import-dropzone.dragover'), 'CSS contains .import-dropzone.dragover active drop styles');
+    assert(appCss.includes('.import-preview-box'), 'CSS contains .import-preview-box styling');
+    assert(appCss.includes('.modal-docs-dialog'), 'CSS contains .modal-docs-dialog expanded sizing');
+    assert(appCss.includes('.docs-preview-iframe'), 'CSS contains .docs-preview-iframe responsive rules');
+    assert(appCss.includes('.docs-source-viewer'), 'CSS contains .docs-source-viewer monospace rules');
+    assert(appCss.includes('.btn-action-docs-col'), 'CSS contains .btn-action-docs-col styling');
+    assert(appCss.includes('.btn-action-export-col'), 'CSS contains .btn-action-export-col styling');
+
+    // 14.3 Client-Side JSON Validation Engine (parseAndValidateImportJson)
+    // Empty / whitespace inputs
+    const emptyValidation1 = parseAndValidateImportJson('');
+    assert(emptyValidation1.valid === false, 'parseAndValidateImportJson rejects empty string');
+    assert(emptyValidation1.error.includes('Please provide non-empty'), 'parseAndValidateImportJson reports friendly empty error');
+
+    const emptyValidation2 = parseAndValidateImportJson('   \n\t  ');
+    assert(emptyValidation2.valid === false, 'parseAndValidateImportJson rejects whitespace-only string');
+
+    const nullValidation = parseAndValidateImportJson(null);
+    assert(nullValidation.valid === false, 'parseAndValidateImportJson rejects null');
+
+    // Malformed JSON syntax
+    const malformedValidation = parseAndValidateImportJson('{"broken": json');
+    assert(malformedValidation.valid === false, 'parseAndValidateImportJson rejects invalid JSON syntax');
+    assert(malformedValidation.error.includes('Invalid JSON syntax'), 'parseAndValidateImportJson reports JSON syntax error');
+
+    // Non-object roots
+    const arrayValidation = parseAndValidateImportJson('["devprobe", "collection"]');
+    assert(arrayValidation.valid === false, 'parseAndValidateImportJson rejects JSON array root');
+    assert(arrayValidation.error.includes('JSON object envelope'), 'parseAndValidateImportJson reports object envelope required');
+
+    const scalarValidation = parseAndValidateImportJson('"just a string"');
+    assert(scalarValidation.valid === false, 'parseAndValidateImportJson rejects scalar string root');
+
+    // Unsupported schema
+    const badSchemaValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'postman/v2.1',
+      version: '1.0.0',
+      collection: { name: 'Postman Col', requests: [] }
+    }));
+    assert(badSchemaValidation.valid === false, 'parseAndValidateImportJson rejects non-devprobe/v1 schema');
+    assert(badSchemaValidation.error.includes("Unsupported schema 'postman/v2.1'"), 'parseAndValidateImportJson names unsupported schema');
+
+    // Unsupported version (SemVer 1.x enforcement)
+    const badVersionValidation1 = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '2.0.0',
+      collection: { name: 'V2 Col', requests: [] }
+    }));
+    assert(badVersionValidation1.valid === false, 'parseAndValidateImportJson rejects major version 2.0.0');
+    assert(badVersionValidation1.error.includes('SemVer 1.x'), 'parseAndValidateImportJson explains SemVer 1.x required');
+
+    const badVersionValidation2 = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1',
+      collection: { name: 'Incomplete Version', requests: [] }
+    }));
+    assert(badVersionValidation2.valid === false, 'parseAndValidateImportJson rejects non-SemVer single digit version "1"');
+
+    const badVersionValidation3 = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0',
+      collection: { name: 'Incomplete Version 1.0', requests: [] }
+    }));
+    assert(badVersionValidation3.valid === false, 'parseAndValidateImportJson rejects two-part version "1.0"');
+
+    // Missing collection object
+    const missingColValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0'
+    }));
+    assert(missingColValidation.valid === false, 'parseAndValidateImportJson rejects payload missing collection object');
+
+    // Collection name empty
+    const emptyColNameValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: { name: '   ', requests: [] }
+    }));
+    assert(emptyColNameValidation.valid === false, 'parseAndValidateImportJson rejects blank collection name');
+
+    // Collection name too long (> 255 chars)
+    const longColNameValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: { name: 'A'.repeat(256), requests: [] }
+    }));
+    assert(longColNameValidation.valid === false, 'parseAndValidateImportJson rejects collection name exceeding 255 chars');
+
+    // Collection requests not array
+    const notArrayRequestsValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: { name: 'Bad Requests Format', requests: 'not an array' }
+    }));
+    assert(notArrayRequestsValidation.valid === false, 'parseAndValidateImportJson rejects non-array collection.requests');
+
+    // Requests limit (> 100 requests)
+    const over100Requests = Array.from({ length: 101 }, (_, i) => ({
+      name: `Req ${i + 1}`,
+      method: 'GET',
+      url: `https://api.example.com/item/${i + 1}`
+    }));
+    const over100Validation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: { name: 'Oversized Collection', requests: over100Requests }
+    }));
+    assert(over100Validation.valid === false, 'parseAndValidateImportJson rejects collection with > 100 requests');
+    assert(over100Validation.error.includes('maximum limit of 100 requests'), 'parseAndValidateImportJson reports 100 requests limit exceeded');
+
+    // Request missing name
+    const reqMissingNameValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: {
+        name: 'Valid Col',
+        requests: [{ method: 'GET', url: 'https://api.example.com' }]
+      }
+    }));
+    assert(reqMissingNameValidation.valid === false, 'parseAndValidateImportJson rejects request missing name');
+
+    // Request missing method
+    const reqMissingMethodValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: {
+        name: 'Valid Col',
+        requests: [{ name: 'Req 1', url: 'https://api.example.com' }]
+      }
+    }));
+    assert(reqMissingMethodValidation.valid === false, 'parseAndValidateImportJson rejects request missing method');
+
+    // Request missing URL
+    const reqMissingUrlValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: {
+        name: 'Valid Col',
+        requests: [{ name: 'Req 1', method: 'GET', url: '' }]
+      }
+    }));
+    assert(reqMissingUrlValidation.valid === false, 'parseAndValidateImportJson rejects request with empty URL');
+
+    // Prohibited embedded URL credentials
+    const embeddedCredsValidation = parseAndValidateImportJson(JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: {
+        name: 'Insecure Collection',
+        requests: [{
+          name: 'Leaky Request',
+          method: 'GET',
+          url: 'https://admin:supersecret@api.example.com/secure'
+        }]
+      }
+    }));
+    assert(embeddedCredsValidation.valid === false, 'parseAndValidateImportJson rejects requests with embedded URL credentials');
+    assert(embeddedCredsValidation.error.includes('embedded URL credentials'), 'parseAndValidateImportJson explains URL credentials prohibition');
+
+    // Valid collection payload
+    const validRawJson = JSON.stringify({
+      schema: 'devprobe/v1',
+      version: '1.0.0',
+      collection: {
+        name: 'Frontend Test Collection',
+        description: 'Comprehensive test collection for frontend UI verification',
+        requests: [
+          {
+            name: 'Get User List',
+            description: 'Returns list of registered users',
+            method: 'GET',
+            url: 'https://api.example.com/users',
+            headers: [{ key: 'Accept', value: 'application/json', enabled: true }],
+            params: [{ key: 'page', value: '1', enabled: true }],
+            body: '',
+            body_type: 'none',
+            auth_type: 'none',
+            assertions: [
+              { id: 'as_1', type: 'status_code', operator: 'equals', expected: '200', enabled: true }
+            ]
+          },
+          {
+            name: 'Create New User',
+            description: 'Creates a new user account',
+            method: 'POST',
+            url: 'https://api.example.com/users',
+            headers: [{ key: 'Content-Type', value: 'application/json', enabled: true }],
+            body: '{"username":"devprobe_user"}',
+            body_type: 'json',
+            auth_type: 'none'
+          }
+        ]
+      }
+    }, null, 2);
+
+    const validValidation = parseAndValidateImportJson(validRawJson);
+    assert(validValidation.valid === true, 'parseAndValidateImportJson accepts valid devprobe/v1 payload');
+    assert(validValidation.error === null, 'parseAndValidateImportJson returns null error for valid payload');
+    assert(validValidation.preview !== null, 'parseAndValidateImportJson provides preview metadata');
+    assert(validValidation.preview.name === 'Frontend Test Collection', 'Preview reflects collection name');
+    assert(validValidation.preview.description === 'Comprehensive test collection for frontend UI verification', 'Preview reflects collection description');
+    assert(validValidation.preview.requestsCount === 2, 'Preview reflects accurate request count (2)');
+    assert(validValidation.preview.schema === 'devprobe/v1', 'Preview reflects schema devprobe/v1');
+    assert(validValidation.preview.version === '1.0.0', 'Preview reflects version 1.0.0');
+
+    // 14.4 Mock DOM Setup for UI Component Testing
+    const uiMockElements = {};
+    function getOrCreateUiMock(id, tag = 'div') {
+      if (!uiMockElements[id]) {
+        let innerHtmlVal = '';
+        const el = {
+          id,
+          tagName: tag.toUpperCase(),
+          value: '',
+          textContent: '',
+          srcdoc: '',
+          disabled: false,
+          className: '',
+          classList: {
+            _classes: new Set(),
+            add(c) { this._classes.add(c); },
+            remove(c) { this._classes.delete(c); },
+            contains(c) { return this._classes.has(c); },
+            toggle(c, force) {
+              if (force === undefined) {
+                if (this._classes.has(c)) this._classes.delete(c);
+                else this._classes.add(c);
+              } else if (force) this._classes.add(c);
+              else this._classes.delete(c);
+            }
+          },
+          children: [],
+          attributes: {},
+          style: {},
+          setAttribute(k, v) { this.attributes[k] = String(v); },
+          getAttribute(k) { return this.attributes[k] || null; },
+          appendChild(child) { this.children.push(child); return child; },
+          removeChild(child) {
+            const idx = this.children.indexOf(child);
+            if (idx !== -1) this.children.splice(idx, 1);
+            return child;
+          },
+          addEventListener() {},
+          removeEventListener() {},
+          click() {},
+          focus() {}
+        };
+        Object.defineProperty(el, 'innerHTML', {
+          get() { return innerHtmlVal; },
+          set(val) {
+            innerHtmlVal = val;
+            if (val === '') this.children = [];
+          }
+        });
+        Object.defineProperty(el, 'className', {
+          get() {
+            return Array.from(this.classList._classes).join(' ');
+          },
+          set(val) {
+            this.classList._classes.clear();
+            if (val && typeof val === 'string') {
+              val.trim().split(/\s+/).filter(Boolean).forEach(c => this.classList._classes.add(c));
+            }
+          }
+        });
+        uiMockElements[id] = el;
+      }
+      return uiMockElements[id];
+    }
+
+    const step5DomIds = [
+      'modal-import-collection', 'btn-import-collection', 'btn-import-col-close',
+      'btn-import-col-cancel', 'btn-import-col-confirm', 'btn-import-confirm-text',
+      'tab-btn-import-file', 'tab-btn-import-paste', 'pane-import-file', 'pane-import-paste',
+      'import-dropzone', 'input-import-file', 'import-file-info', 'import-file-name',
+      'btn-import-file-remove', 'input-import-json', 'import-error-box', 'import-error-text',
+      'import-preview-box', 'import-preview-name', 'import-preview-count', 'import-preview-desc',
+      'import-preview-badge',
+      'modal-api-docs', 'docs-modal-heading', 'btn-docs-modal-close',
+      'btn-docs-tab-preview', 'btn-docs-tab-markdown', 'btn-docs-tab-html',
+      'pane-docs-preview', 'pane-docs-markdown', 'pane-docs-html',
+      'btn-docs-copy-md', 'btn-docs-copy-html', 'btn-docs-download-md', 'btn-docs-download-html',
+      'docs-loading-state', 'docs-error-state', 'docs-error-text',
+      'docs-preview-iframe', 'docs-markdown-source', 'docs-html-source'
+    ];
+    step5DomIds.forEach(id => getOrCreateUiMock(id));
+
+    // Save previous globals if any
+    const prevDocument = global.document;
+    const prevWindow = global.window;
+    const prevBlob = global.Blob;
+    const prevURL = global.URL;
+
+    global.document = {
+      getElementById(id) {
+        return uiMockElements[id] || null;
+      },
+      createElement(tag) {
+        return getOrCreateUiMock(`mock-element-${Date.now()}-${Math.random()}`, tag);
+      },
+      body: getOrCreateUiMock('mock-body', 'body')
+    };
+
+    let createdBlobContent = null;
+    let createdBlobType = null;
+    global.Blob = class MockBlob {
+      constructor(contentArray, options) {
+        createdBlobContent = contentArray;
+        createdBlobType = options ? options.type : '';
+      }
+    };
+
+    let createdObjectUrl = '';
+    let revokedObjectUrl = '';
+    global.URL = {
+      createObjectURL(blob) {
+        createdObjectUrl = 'blob:http://localhost/mock-uuid';
+        return createdObjectUrl;
+      },
+      revokeObjectURL(url) {
+        revokedObjectUrl = url;
+      }
+    };
+
+    global.window = {
+      Blob: global.Blob,
+      URL: global.URL
+    };
+
+    // 14.5 downloadFile Utility Verification
+    let downloadLinkCreated = false;
+    let clickedDownload = false;
+    let downloadHref = '';
+    let downloadFilename = '';
+
+    const origCreateElement = global.document.createElement;
+    global.document.createElement = function(tag) {
+      const el = origCreateElement(tag);
+      if (tag.toLowerCase() === 'a') {
+        downloadLinkCreated = true;
+        el.click = function() {
+          clickedDownload = true;
+          downloadHref = el.href;
+          downloadFilename = el.download;
+        };
+      }
+      return el;
+    };
+
+    downloadFile('{"exported": true}', 'my-collection.json', 'application/json');
+    assert(downloadLinkCreated === true, 'downloadFile creates anchor element');
+    assert(clickedDownload === true, 'downloadFile dispatches click on anchor element');
+    assert(downloadFilename === 'my-collection.json', 'downloadFile sets download filename attribute');
+    assert(downloadHref === 'blob:http://localhost/mock-uuid', 'downloadFile sets href to object URL');
+    assert(createdBlobType === 'application/json', 'downloadFile creates Blob with correct MIME type');
+
+    // Restore createElement
+    global.document.createElement = origCreateElement;
+
+    // 14.6 Collection Import Modal UI Lifecycle Testing
+    // Open modal
+    openImportCollectionModal();
+    const importModal = uiMockElements['modal-import-collection'];
+    assert(importModal.classList.contains('active'), 'openImportCollectionModal activates #modal-import-collection');
+    assert(getActiveImportPayload() === null, 'openImportCollectionModal resets activeImportPayload to null');
+    assert(uiMockElements['btn-import-col-confirm'].disabled === true, 'Import confirm button is disabled initially');
+
+    // Tab switching in import modal
+    switchImportTab('paste');
+    assert(uiMockElements['tab-btn-import-paste'].classList.contains('active'), 'switchImportTab("paste") activates paste tab button');
+    assert(!uiMockElements['tab-btn-import-file'].classList.contains('active'), 'switchImportTab("paste") deactivates file tab button');
+    assert(!uiMockElements['pane-import-paste'].classList.contains('hidden'), 'switchImportTab("paste") reveals paste pane');
+    assert(uiMockElements['pane-import-file'].classList.contains('hidden'), 'switchImportTab("paste") hides file pane');
+
+    switchImportTab('file');
+    assert(uiMockElements['tab-btn-import-file'].classList.contains('active'), 'switchImportTab("file") activates file tab button');
+    assert(!uiMockElements['tab-btn-import-paste'].classList.contains('active'), 'switchImportTab("file") deactivates paste tab button');
+    assert(!uiMockElements['pane-import-file'].classList.contains('hidden'), 'switchImportTab("file") reveals file pane');
+    assert(uiMockElements['pane-import-paste'].classList.contains('hidden'), 'switchImportTab("file") hides paste pane');
+
+    // Update preview with valid result
+    updateImportPreview(validValidation);
+    assert(getActiveImportPayload() !== null, 'updateImportPreview sets activeImportPayload on valid data');
+    assert(!uiMockElements['import-preview-box'].classList.contains('hidden'), 'updateImportPreview reveals preview box');
+    assert(uiMockElements['import-error-box'].classList.contains('hidden'), 'updateImportPreview hides error box on valid data');
+    assert(uiMockElements['import-preview-name'].textContent === 'Frontend Test Collection', 'updateImportPreview renders collection name via textContent');
+    assert(uiMockElements['import-preview-count'].textContent === '2 requests', 'updateImportPreview renders request count');
+    assert(uiMockElements['btn-import-col-confirm'].disabled === false, 'updateImportPreview enables confirm button on valid data');
+
+    // Update preview with invalid result
+    updateImportPreview(badSchemaValidation);
+    assert(getActiveImportPayload() === null, 'updateImportPreview clears activeImportPayload on error');
+    assert(uiMockElements['import-preview-box'].classList.contains('hidden'), 'updateImportPreview hides preview box on error');
+    assert(!uiMockElements['import-error-box'].classList.contains('hidden'), 'updateImportPreview reveals error box on error');
+    assert(uiMockElements['import-error-text'].textContent.includes("Unsupported schema 'postman/v2.1'"), 'updateImportPreview renders safe error text');
+    assert(uiMockElements['btn-import-col-confirm'].disabled === true, 'updateImportPreview disables confirm button on error');
+
+    // Close modal
+    closeImportCollectionModal();
+    assert(!importModal.classList.contains('active'), 'closeImportCollectionModal deactivates #modal-import-collection');
+    assert(getActiveImportPayload() === null, 'closeImportCollectionModal cleans up active payload');
+
+    // 14.7 API Documentation Modal UI Lifecycle Testing
+    const docsModal = uiMockElements['modal-api-docs'];
+
+    // Mock fetch for docs modal testing
+    const originalFetch = global.fetch;
+    const sampleMdText = '# API Documentation — Test Collection\n\n## Endpoints\n- GET /api/v1/users';
+    const sampleHtmlText = '<!DOCTYPE html><html><head><title>API Docs</title></head><body><h1>API Docs</h1></body></html>';
+
+    global.fetch = async function(url) {
+      if (typeof url === 'string' && url.includes('/docs/markdown')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => sampleMdText
+        };
+      }
+      if (typeof url === 'string' && url.includes('/docs/html')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => sampleHtmlText
+        };
+      }
+      if (typeof url === 'string' && url.includes('/export')) {
+        return {
+          ok: true,
+          status: 200,
+          headers: {
+            get: (h) => (h.toLowerCase() === 'content-disposition' ? 'attachment; filename="Exported_Collection.json"' : null)
+          },
+          text: async () => '{"schema":"devprobe/v1","collection":{"name":"Exported_Collection"}}'
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({ error: { message: 'Not found' } }) };
+    };
+
+    // Open API docs modal
+    await openApiDocsModal(42, 'Test Collection');
+    assert(docsModal.classList.contains('active'), 'openApiDocsModal activates #modal-api-docs');
+    assert(uiMockElements['docs-modal-heading'].textContent === 'API Documentation — Test Collection', 'openApiDocsModal sets modal heading');
+    assert(getActiveDocsCollection() !== null && getActiveDocsCollection().id === 42, 'openApiDocsModal tracks activeDocsCollection');
+    assert(getCachedMarkdownDoc() === sampleMdText, 'openApiDocsModal caches retrieved Markdown documentation');
+    assert(getCachedHtmlDoc() === sampleHtmlText, 'openApiDocsModal caches retrieved HTML documentation');
+    assert(uiMockElements['docs-preview-iframe'].srcdoc === sampleHtmlText, 'openApiDocsModal populates sandboxed iframe srcdoc');
+    assert(uiMockElements['docs-markdown-source'].value === sampleMdText, 'openApiDocsModal populates markdown source textarea');
+    assert(uiMockElements['docs-html-source'].value === sampleHtmlText, 'openApiDocsModal populates HTML source textarea');
+    assert(uiMockElements['btn-docs-copy-md'].disabled === false, 'openApiDocsModal enables copy markdown button');
+    assert(uiMockElements['btn-docs-download-md'].disabled === false, 'openApiDocsModal enables download markdown button');
+
+    // Switch docs tabs
+    switchDocsTab('markdown');
+    assert(uiMockElements['btn-docs-tab-markdown'].classList.contains('active'), 'switchDocsTab("markdown") activates markdown tab');
+    assert(!uiMockElements['pane-docs-markdown'].classList.contains('hidden'), 'switchDocsTab("markdown") displays markdown pane');
+    assert(uiMockElements['pane-docs-preview'].classList.contains('hidden'), 'switchDocsTab("markdown") hides preview pane');
+
+    switchDocsTab('html');
+    assert(uiMockElements['btn-docs-tab-html'].classList.contains('active'), 'switchDocsTab("html") activates HTML tab');
+    assert(!uiMockElements['pane-docs-html'].classList.contains('hidden'), 'switchDocsTab("html") displays HTML pane');
+    assert(uiMockElements['pane-docs-markdown'].classList.contains('hidden'), 'switchDocsTab("html") hides markdown pane');
+
+    switchDocsTab('preview');
+    assert(uiMockElements['btn-docs-tab-preview'].classList.contains('active'), 'switchDocsTab("preview") activates preview tab');
+    assert(!uiMockElements['pane-docs-preview'].classList.contains('hidden'), 'switchDocsTab("preview") displays preview pane');
+    assert(uiMockElements['pane-docs-html'].classList.contains('hidden'), 'switchDocsTab("preview") hides HTML pane');
+
+    // Close API docs modal & cleanup check
+    closeApiDocsModal();
+    assert(!docsModal.classList.contains('active'), 'closeApiDocsModal deactivates #modal-api-docs');
+    assert(uiMockElements['docs-preview-iframe'].srcdoc === '', 'closeApiDocsModal clears iframe srcdoc to free memory');
+    assert(uiMockElements['docs-markdown-source'].value === '', 'closeApiDocsModal clears raw markdown textarea');
+    assert(uiMockElements['docs-html-source'].value === '', 'closeApiDocsModal clears raw HTML textarea');
+    assert(getCachedMarkdownDoc() === '', 'closeApiDocsModal clears cached markdown doc');
+    assert(getCachedHtmlDoc() === '', 'closeApiDocsModal clears cached HTML doc');
+    assert(getActiveDocsCollection() === null, 'closeApiDocsModal resets activeDocsCollection to null');
+
+    // 14.8 Export Collection To JSON Trigger
+    let exportedDownloaded = false;
+    global.document.createElement = function(tag) {
+      const el = origCreateElement(tag);
+      if (tag.toLowerCase() === 'a') {
+        el.click = function() {
+          exportedDownloaded = true;
+          assert(el.download === 'Exported_Collection.json', 'exportCollectionToJson uses Content-Disposition filename');
+        };
+      }
+      return el;
+    };
+
+    await exportCollectionToJson(42, 'Test Collection');
+    assert(exportedDownloaded === true, 'exportCollectionToJson triggers file download from API response');
+
+    // Restore original globals
+    global.document.createElement = origCreateElement;
+    global.fetch = originalFetch;
+    global.document = prevDocument;
+    global.window = prevWindow;
+    global.Blob = prevBlob;
+    global.URL = prevURL;
+
+    // -------------------------------------------------------------
+    // Section 15: Final Testing & Security Hardening Verification (Step 6)
+    // -------------------------------------------------------------
+    console.log('\n[SECTION 15] Final Testing & Security Hardening Verification (Step 6)');
+
+    // 15.1 Content-Disposition Sanitization & Header Injection Defense
+    const basicDisp = buildContentDisposition('Users API', 'json');
+    assert(basicDisp.startsWith('attachment; filename="Users_API.json"'), 'buildContentDisposition builds safe ASCII attachment filename');
+    assert(basicDisp.includes("filename*=UTF-8''Users%20API.json"), 'buildContentDisposition includes RFC 5987 UTF-8 encoded filename');
+
+    const injectionDisp = buildContentDisposition('Injected\r\nSet-Cookie: session=evil\r\nLocation: http://evil.com', 'json');
+    assert(!injectionDisp.includes('\r') && !injectionDisp.includes('\n'), 'buildContentDisposition strips CRLF characters to prevent HTTP response splitting');
+
+    const dangerousCharsDisp = buildContentDisposition('test/"quoted\\<brackets>:and*pipe|and?question.json', 'json');
+    assert(!/[\r\n"\\/<>:|?*]/.test(dangerousCharsDisp.split('filename="')[1].split('"')[0]), 'buildContentDisposition strips filesystem and quoting characters in ASCII fallback');
+
+    const inlineDisp = buildContentDisposition('Inline Doc', 'html', false);
+    assert(inlineDisp.startsWith('inline; filename="Inline_Doc.html"'), 'buildContentDisposition supports inline disposition mode');
+
+    // 15.2 Documentation Service Wrapper Boundaries (getCollectionMarkdown & getCollectionHtml)
+    let getMd404Caught = false;
+    try {
+      await getCollectionMarkdown(99999999);
+    } catch (err) {
+      getMd404Caught = true;
+      assert(err.statusCode === 404, 'getCollectionMarkdown throws 404 AppError for nonexistent collection');
+    }
+    assert(getMd404Caught === true, 'getCollectionMarkdown rejects nonexistent collection');
+
+    let getMd400Caught = false;
+    try {
+      await getCollectionMarkdown(-1);
+    } catch (err) {
+      getMd400Caught = true;
+      assert(err.statusCode === 400, 'getCollectionMarkdown throws 400 AppError for negative collection ID');
+    }
+    assert(getMd400Caught === true, 'getCollectionMarkdown rejects invalid numeric collection ID');
+
+    let getHtml404Caught = false;
+    try {
+      await getCollectionHtml(99999999);
+    } catch (err) {
+      getHtml404Caught = true;
+      assert(err.statusCode === 404, 'getCollectionHtml throws 404 AppError for nonexistent collection');
+    }
+    assert(getHtml404Caught === true, 'getCollectionHtml rejects nonexistent collection');
+
+    let getHtml400Caught = false;
+    try {
+      await getCollectionHtml('invalid-id');
+    } catch (err) {
+      getHtml400Caught = true;
+      assert(err.statusCode === 400, 'getCollectionHtml throws 400 AppError for non-numeric collection ID');
+    }
+    assert(getHtml400Caught === true, 'getCollectionHtml rejects non-numeric collection ID');
+
+    // 15.3 cURL Shell Escaping Robustness
+    const quoteUrlRequest = {
+      method: 'GET',
+      url: "https://api.example.com/search?query=it's_a_test"
+    };
+    const quoteUrlSnippet = generateCurlSnippet(quoteUrlRequest);
+    assert(quoteUrlSnippet.includes("'https://api.example.com/search?query=it%27s_a_test'"), 'generateCurlSnippet safely encodes single quote in standard URL');
+
+    const templateQuoteReq = {
+      method: 'GET',
+      url: "{{base_url}}/search?query=it's_a_test"
+    };
+    const templateQuoteSnippet = generateCurlSnippet(templateQuoteReq);
+    assert(templateQuoteSnippet.includes("'{{base_url}}/search?query=it'\\''s_a_test'"), 'generateCurlSnippet safely shell-escapes single quotes in template URLs');
+
+    const quoteBodyRequest = {
+      method: 'POST',
+      url: 'https://api.example.com/orders',
+      body: JSON.stringify({ note: "Customer's special request with 'quotes'" }),
+      body_type: 'json'
+    };
+    const quoteBodySnippet = generateCurlSnippet(quoteBodyRequest);
+    assert(quoteBodySnippet.includes("'\\''"), 'generateCurlSnippet escapes embedded single quotes in request body');
+
+    // 15.4 Anti-Prototype-Pollution Defense in Documentation Generator
+    const taintedQueryReq = {
+      method: 'GET',
+      url: 'https://api.example.com/items',
+      params: [
+        { key: '__proto__', value: 'polluted_val', enabled: true },
+        { key: 'category', value: 'electronics', enabled: true }
+      ]
+    };
+    buildEffectiveUrl(taintedQueryReq.url, taintedQueryReq.params);
+    assert(({}).polluted_val === undefined, 'buildEffectiveUrl does not cause prototype pollution with __proto__');
+
+    // 15.5 Multiline Request Description Formatting in Markdown and HTML
+    const sampleLongDescCol = {
+      id: 501,
+      name: 'Format Verification Collection',
+      description: 'Collection overview paragraph.\n\nSecond paragraph with **bold** text.'
+    };
+    const sampleLongDescReqs = [{
+      id: 601,
+      name: 'Get Formatted Details',
+      description: 'First description line.\n\n- Item 1\n- Item 2\n\n```json\n{"code": 1}\n```',
+      method: 'GET',
+      url: 'https://api.example.com/format-test',
+      headers: [],
+      params: [],
+      body: '',
+      body_type: 'none',
+      auth_type: 'none',
+      assertions: []
+    }];
+
+    const formatMarkdown = generateCollectionMarkdown(sampleLongDescCol, sampleLongDescReqs, {});
+    assert(formatMarkdown.includes('First description line.'), 'Markdown preserves first description paragraph');
+    assert(formatMarkdown.includes('- Item 1'), 'Markdown preserves bullet list formatting in request description');
+    assert(formatMarkdown.includes('{"code": 1}'), 'Markdown preserves code blocks in request description');
+
+    const formatHtml = generateCollectionHtml(sampleLongDescCol, sampleLongDescReqs, {});
+    assert(formatHtml.includes('First description line.'), 'HTML preserves description text content');
+
+    const xssDescReqs = [{
+      id: 602,
+      name: 'XSS Test',
+      description: 'Dangerous <script>alert(1)</script> & "quotes"',
+      method: 'GET',
+      url: 'https://api.example.com/xss',
+      headers: [],
+      params: [],
+      body: '',
+      body_type: 'none',
+      auth_type: 'none'
+    }];
+    const xssHtml = generateCollectionHtml(sampleLongDescCol, xssDescReqs, {});
+    assert(xssHtml.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), 'HTML documentation safely escapes <script> tags in request descriptions');
+    assert(!xssHtml.includes('<script>alert(1)</script>'), 'HTML documentation never includes unescaped script tags');
+
 
   } catch (err) {
     console.error('Fatal error during test suite execution:', err);
@@ -2458,7 +3181,7 @@ async function runTests() {
     console.log('Teardown complete.');
 
     console.log('\n============================================================');
-    console.log(`  Day 15 Steps 1, 2, 3 & 4 Tests Finished: ${passedTests}/${totalTests} Passed`);
+    console.log(`  Day 15 Steps 1, 2, 3, 4, 5 & 6 Tests Finished: ${passedTests}/${totalTests} Passed`);
     console.log('============================================================\n');
   }
 }

@@ -118,6 +118,14 @@
           <div class="sidebar-title-row">
             <span class="sidebar-heading">COLLECTIONS</span>
             <div class="sidebar-actions">
+              <button id="btn-import-collection" class="btn-text-action" title="Import Collection from JSON">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Import</span>
+              </button>
               <button id="btn-new-collection" class="btn-text-action" title="Create New Collection">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -1424,6 +1432,225 @@
         <div class="modal-footer">
           <button type="button" class="modal-btn modal-btn-cancel" id="btn-clear-hist-cancel">Cancel</button>
           <button type="button" class="modal-btn modal-btn-danger" id="btn-clear-hist-confirm">Clear All History</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 15 Modal: Import Collection -->
+    <div id="modal-import-collection" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-import-title">
+      <div class="modal-dialog modal-dialog-lg">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-import-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Import Collection</span>
+          </div>
+          <button class="modal-close" id="btn-import-col-close" aria-label="Close dialog">&times;</button>
+        </div>
+
+        <div class="modal-body" style="gap: 14px;">
+          <!-- Import Mode Tabs -->
+          <div class="import-tabs-header">
+            <button type="button" class="import-tab-btn active" id="tab-btn-import-file" data-tab="file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+              </svg>
+              <span>Upload JSON File</span>
+            </button>
+            <button type="button" class="import-tab-btn" id="tab-btn-import-paste" data-tab="paste">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+              </svg>
+              <span>Paste JSON</span>
+            </button>
+          </div>
+
+          <!-- File Upload Pane -->
+          <div id="pane-import-file" class="import-tab-pane active">
+            <div id="import-dropzone" class="import-dropzone" role="button" tabindex="0">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <div class="dropzone-text">
+                <span class="dropzone-prompt">Choose a JSON file or drag and drop</span>
+                <span class="dropzone-hint">Accepts devprobe/v1 collection JSON files (max 10 MB)</span>
+              </div>
+              <input type="file" id="input-import-file" accept=".json,application/json" style="display: none;">
+            </div>
+            <div id="import-file-info" class="import-file-info hidden">
+              <span id="import-file-name" class="import-filename"></span>
+              <button type="button" id="btn-import-file-remove" class="btn-text-action" title="Remove selected file">&times;</button>
+            </div>
+          </div>
+
+          <!-- Paste JSON Pane -->
+          <div id="pane-import-paste" class="import-tab-pane hidden">
+            <label for="input-import-json" class="modal-label">Paste JSON Collection Data</label>
+            <textarea id="input-import-json" class="modal-textarea import-textarea" placeholder="Paste devprobe/v1 JSON collection bundle here..." rows="8" spellcheck="false"></textarea>
+          </div>
+
+          <!-- Validation Error Box -->
+          <div id="import-error-box" class="import-alert import-alert-danger hidden" role="alert">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <div id="import-error-text" class="import-alert-text"></div>
+          </div>
+
+          <!-- Validation Preview Box -->
+          <div id="import-preview-box" class="import-preview-container hidden">
+            <div class="import-preview-header">
+              <span class="import-preview-title">Collection Preview</span>
+              <span id="import-preview-badge" class="import-preview-badge">devprobe/v1</span>
+            </div>
+            <div class="import-preview-grid">
+              <div class="import-preview-item">
+                <span class="import-preview-label">Name:</span>
+                <span id="import-preview-name" class="import-preview-value"></span>
+              </div>
+              <div class="import-preview-item">
+                <span class="import-preview-label">Requests:</span>
+                <span id="import-preview-count" class="import-preview-value"></span>
+              </div>
+              <div class="import-preview-item import-preview-item-full">
+                <span class="import-preview-label">Description:</span>
+                <span id="import-preview-desc" class="import-preview-value"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="modal-btn modal-btn-cancel" id="btn-import-col-cancel">Cancel</button>
+          <button type="button" class="modal-btn modal-btn-primary" id="btn-import-col-confirm" disabled>
+            <span id="btn-import-confirm-text">Import Collection</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Day 15 Modal: API Documentation -->
+    <div id="modal-api-docs" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-docs-title">
+      <div class="modal-dialog modal-dialog-xl modal-docs-dialog">
+        <div class="modal-header">
+          <div class="modal-title" id="modal-docs-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span id="docs-modal-heading">API Documentation</span>
+          </div>
+          <button class="modal-close" id="btn-docs-modal-close" aria-label="Close dialog">&times;</button>
+        </div>
+
+        <!-- Documentation Subheader: Tabs & Action Buttons -->
+        <div class="docs-controls-bar">
+          <div class="docs-tabs-group">
+            <button type="button" class="docs-tab-btn active" id="btn-docs-tab-preview" data-tab="preview">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              <span>Formatted Preview</span>
+            </button>
+            <button type="button" class="docs-tab-btn" id="btn-docs-tab-markdown" data-tab="markdown">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <span>Raw Markdown</span>
+            </button>
+            <button type="button" class="docs-tab-btn" id="btn-docs-tab-html" data-tab="html">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+              <span>Raw HTML</span>
+            </button>
+          </div>
+
+          <div class="docs-actions-group">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-docs-copy-md" title="Copy Markdown to Clipboard">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy MD</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-docs-copy-html" title="Copy HTML source to Clipboard">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span>Copy HTML</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-docs-download-md" title="Download Markdown .md file">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download MD</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-docs-download-html" title="Download HTML .html file">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Download HTML</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-body docs-modal-body">
+          <!-- Loading State Indicator -->
+          <div id="docs-loading-state" class="docs-state-box hidden">
+            <div class="spinner"></div>
+            <span>Generating API documentation...</span>
+          </div>
+
+          <!-- Error State Indicator -->
+          <div id="docs-error-state" class="docs-state-box docs-error-box hidden" role="alert">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <span id="docs-error-text">Failed to load documentation.</span>
+          </div>
+
+          <!-- Tab 1: Formatted Preview (Sandboxed iframe) -->
+          <div id="pane-docs-preview" class="docs-tab-pane active">
+            <iframe id="docs-preview-iframe" class="docs-preview-iframe" sandbox="" title="API Documentation Preview"></iframe>
+          </div>
+
+          <!-- Tab 2: Raw Markdown Source -->
+          <div id="pane-docs-markdown" class="docs-tab-pane hidden">
+            <textarea id="docs-markdown-source" class="docs-code-viewer" readonly spellcheck="false" placeholder="Markdown documentation source..."></textarea>
+          </div>
+
+          <!-- Tab 3: Raw HTML Source -->
+          <div id="pane-docs-html" class="docs-tab-pane hidden">
+            <textarea id="docs-html-source" class="docs-code-viewer" readonly spellcheck="false" placeholder="HTML documentation source..."></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="modal-btn modal-btn-cancel" id="btn-docs-modal-dismiss">Close</button>
         </div>
       </div>
     </div>

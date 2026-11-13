@@ -1276,7 +1276,11 @@ if (typeof document !== 'undefined') {
   // 12. Assertion Builder UI (Day 14)
   initAssertionBuilder();
 
-  // 13. Initial state render
+  // 13. Collection Import/Export & API Documentation Generator (Day 15)
+  initCollectionImport();
+  initApiDocsModal();
+
+  // 14. Initial state render
   renderActiveRequestToUI();
   });
 
@@ -3082,6 +3086,22 @@ async function loadCollectionsAndSavedRequests() {
             <span class="folder-badge" title="${colRequests.length} saved requests">${colRequests.length}</span>
           </div>
           <div class="folder-actions">
+            <button class="btn-item-action btn-action-docs-col" title="View API Documentation" aria-label="API Documentation">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+            </button>
+            <button class="btn-item-action btn-action-export-col" title="Export collection as JSON" aria-label="Export collection">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
             <button class="btn-item-action btn-action-edit-col" title="Edit collection" aria-label="Edit collection">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -3103,8 +3123,24 @@ async function loadCollectionsAndSavedRequests() {
           headerEl.setAttribute('aria-expanded', (!isCollapsed).toString());
         });
 
+        const btnDocsCol = headerEl.querySelector('.btn-action-docs-col');
+        const btnExportCol = headerEl.querySelector('.btn-action-export-col');
         const btnEditCol = headerEl.querySelector('.btn-action-edit-col');
         const btnDelCol = headerEl.querySelector('.btn-action-del-col');
+
+        if (btnDocsCol) {
+          btnDocsCol.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openApiDocsModal(col);
+          });
+        }
+
+        if (btnExportCol) {
+          btnExportCol.addEventListener('click', (e) => {
+            e.stopPropagation();
+            exportCollectionToJson(col.id, col.name);
+          });
+        }
 
         if (btnEditCol) {
           btnEditCol.addEventListener('click', (e) => {
@@ -3588,10 +3624,16 @@ function initPersistentCollections() {
   }
 
   // Close modals when clicking overlay background
-  [modalCol, modalEditCol, modalDelCol, modalSave, modalEditReq, modalDelReq].forEach((m) => {
+  const modalImportCol = document.getElementById('modal-import-collection');
+  const modalDocs = document.getElementById('modal-api-docs');
+  [modalCol, modalEditCol, modalDelCol, modalSave, modalEditReq, modalDelReq, modalImportCol, modalDocs].forEach((m) => {
     if (m) {
       m.addEventListener('click', (e) => {
-        if (e.target === m) m.classList.remove('active');
+        if (e.target === m) {
+          if (m === modalDocs) closeApiDocsModal();
+          else if (m === modalImportCol) closeImportCollectionModal();
+          else m.classList.remove('active');
+        }
       });
     }
   });
@@ -3600,11 +3642,665 @@ function initPersistentCollections() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay.active').forEach((m) => m.classList.remove('active'));
+      closeApiDocsModal();
+      closeImportCollectionModal();
     }
   });
 
   // Initial load of collections and saved requests
   loadCollectionsAndSavedRequests();
+}
+
+/* ==========================================================================
+   Day 15: Collection Import/Export & API Documentation UI Handlers
+   ========================================================================== */
+
+/**
+ * Triggers a browser file download using a temporary Blob URL and <a> anchor element.
+ *
+ * @param {string|Blob} content - File content string or Blob
+ * @param {string} filename - Target filename for download
+ * @param {string} [mimeType='text/plain'] - MIME type for Blob
+ */
+function downloadFile(content, filename, mimeType = 'text/plain') {
+  if (typeof document === 'undefined') return;
+  const safeFilename = (filename || 'download').replace(/[\r\n"\\/<>:|?*]/g, '_');
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = safeFilename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    if (a.parentNode) a.parentNode.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
+}
+
+/**
+ * Parses and strictly validates an incoming JSON collection string against devprobe/v1 requirements.
+ *
+ * @param {string} jsonString - The raw JSON string to parse and validate
+ * @returns {{ valid: boolean, error: string|null, payload: object|null, preview: object|null }}
+ */
+function parseAndValidateImportJson(jsonString) {
+  if (!jsonString || typeof jsonString !== 'string' || !jsonString.trim()) {
+    return { valid: false, error: 'Please provide non-empty JSON collection data.', payload: null, preview: null };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonString);
+  } catch (err) {
+    return { valid: false, error: `Invalid JSON syntax: ${err.message}`, payload: null, preview: null };
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { valid: false, error: 'Import payload must be a JSON object envelope.', payload: null, preview: null };
+  }
+
+  // Schema check (must be devprobe/v1 if provided)
+  if (parsed.schema !== undefined && parsed.schema !== null) {
+    if (typeof parsed.schema !== 'string' || parsed.schema.trim().toLowerCase() !== 'devprobe/v1') {
+      return { valid: false, error: `Unsupported schema '${parsed.schema}'. Expected 'devprobe/v1'.`, payload: null, preview: null };
+    }
+  }
+
+  // Version check (must be SemVer 1.x)
+  if (parsed.version !== undefined && parsed.version !== null) {
+    const semVerPattern = /^1\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+    if (typeof parsed.version !== 'string' || !semVerPattern.test(parsed.version.trim())) {
+      return { valid: false, error: `Unsupported version '${parsed.version}'. DevProbe currently supports SemVer 1.x.`, payload: null, preview: null };
+    }
+  }
+
+  // Collection object validation
+  const collection = parsed.collection;
+  if (!collection || typeof collection !== 'object' || Array.isArray(collection)) {
+    return { valid: false, error: "Missing required 'collection' object in JSON payload.", payload: null, preview: null };
+  }
+
+  const name = typeof collection.name === 'string' ? collection.name.trim() : '';
+  if (!name) {
+    return { valid: false, error: 'Collection name is required and cannot be empty.', payload: null, preview: null };
+  }
+
+  if (name.length > 255) {
+    return { valid: false, error: 'Collection name cannot exceed 255 characters.', payload: null, preview: null };
+  }
+
+  const desc = typeof collection.description === 'string' ? collection.description.trim() : null;
+
+  // Requests array validation
+  const requests = collection.requests || [];
+  if (!Array.isArray(requests)) {
+    return { valid: false, error: "'collection.requests' must be an array.", payload: null, preview: null };
+  }
+
+  if (requests.length > 100) {
+    return { valid: false, error: `Collection contains ${requests.length} requests, exceeding the maximum limit of 100 requests.`, payload: null, preview: null };
+  }
+
+  // Inspect each request for basic validity
+  for (let i = 0; i < requests.length; i++) {
+    const r = requests[i];
+    if (!r || typeof r !== 'object' || Array.isArray(r)) {
+      return { valid: false, error: `Request at index ${i} must be an object.`, payload: null, preview: null };
+    }
+    const rName = typeof r.name === 'string' ? r.name.trim() : '';
+    if (!rName) {
+      return { valid: false, error: `Request at index ${i} is missing a valid name.`, payload: null, preview: null };
+    }
+    const rMethod = typeof r.method === 'string' ? r.method.trim().toUpperCase() : '';
+    if (!rMethod) {
+      return { valid: false, error: `Request '${rName}' is missing an HTTP method.`, payload: null, preview: null };
+    }
+    const rUrl = typeof r.url === 'string' ? r.url.trim() : '';
+    if (!rUrl) {
+      return { valid: false, error: `Request '${rName}' is missing a URL.`, payload: null, preview: null };
+    }
+    if (/^[a-z]+:\/\/[^@\s]+:[^@\s]+@/i.test(rUrl)) {
+      return { valid: false, error: `Request '${rName}' contains embedded URL credentials, which are prohibited.`, payload: null, preview: null };
+    }
+  }
+
+  return {
+    valid: true,
+    error: null,
+    payload: parsed,
+    preview: {
+      name,
+      description: desc,
+      requestsCount: requests.length,
+      schema: parsed.schema || 'devprobe/v1',
+      version: parsed.version || '1.0.0'
+    }
+  };
+}
+
+let activeImportPayload = null;
+let isImportingCollection = false;
+
+function openImportCollectionModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-import-collection');
+  if (!modal) return;
+
+  resetImportModalState();
+  modal.classList.add('active');
+}
+
+function closeImportCollectionModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-import-collection');
+  if (modal) {
+    modal.classList.remove('active');
+  }
+  resetImportModalState();
+}
+
+function resetImportModalState() {
+  if (typeof document === 'undefined') return;
+  activeImportPayload = null;
+  isImportingCollection = false;
+
+  const fileInput = document.getElementById('input-import-file');
+  if (fileInput) fileInput.value = '';
+
+  const fileInfo = document.getElementById('import-file-info');
+  if (fileInfo) fileInfo.classList.add('hidden');
+
+  const fileName = document.getElementById('import-file-name');
+  if (fileName) fileName.textContent = '';
+
+  const textarea = document.getElementById('input-import-json');
+  if (textarea) textarea.value = '';
+
+  const errorBox = document.getElementById('import-error-box');
+  if (errorBox) errorBox.classList.add('hidden');
+
+  const errorText = document.getElementById('import-error-text');
+  if (errorText) errorText.textContent = '';
+
+  const previewBox = document.getElementById('import-preview-box');
+  if (previewBox) previewBox.classList.add('hidden');
+
+  const confirmBtn = document.getElementById('btn-import-col-confirm');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    const btnText = document.getElementById('btn-import-confirm-text');
+    if (btnText) btnText.textContent = 'Import Collection';
+  }
+
+  switchImportTab('file');
+}
+
+function switchImportTab(tabName) {
+  if (typeof document === 'undefined') return;
+  const tabBtnFile = document.getElementById('tab-btn-import-file');
+  const tabBtnPaste = document.getElementById('tab-btn-import-paste');
+  const paneFile = document.getElementById('pane-import-file');
+  const panePaste = document.getElementById('pane-import-paste');
+
+  if (tabName === 'paste') {
+    tabBtnPaste?.classList.add('active');
+    tabBtnFile?.classList.remove('active');
+    panePaste?.classList.remove('hidden');
+    panePaste?.classList.add('active');
+    paneFile?.classList.add('hidden');
+    paneFile?.classList.remove('active');
+    const textarea = document.getElementById('input-import-json');
+    if (textarea) textarea.focus();
+  } else {
+    tabBtnFile?.classList.add('active');
+    tabBtnPaste?.classList.remove('active');
+    paneFile?.classList.remove('hidden');
+    paneFile?.classList.add('active');
+    panePaste?.classList.add('hidden');
+    panePaste?.classList.remove('active');
+  }
+}
+
+function updateImportPreview(result) {
+  if (typeof document === 'undefined') return;
+  const errorBox = document.getElementById('import-error-box');
+  const errorText = document.getElementById('import-error-text');
+  const previewBox = document.getElementById('import-preview-box');
+  const previewName = document.getElementById('import-preview-name');
+  const previewCount = document.getElementById('import-preview-count');
+  const previewDesc = document.getElementById('import-preview-desc');
+  const previewBadge = document.getElementById('import-preview-badge');
+  const confirmBtn = document.getElementById('btn-import-col-confirm');
+
+  if (result.valid) {
+    activeImportPayload = result.payload;
+    if (errorBox) errorBox.classList.add('hidden');
+    if (errorText) errorText.textContent = '';
+
+    if (previewBox) {
+      previewBox.classList.remove('hidden');
+      if (previewName) previewName.textContent = result.preview.name;
+      if (previewCount) previewCount.textContent = `${result.preview.requestsCount} request${result.preview.requestsCount === 1 ? '' : 's'}`;
+      if (previewDesc) previewDesc.textContent = result.preview.description || 'None';
+      if (previewBadge) previewBadge.textContent = `${result.preview.schema} (v${result.preview.version})`;
+    }
+
+    if (confirmBtn) confirmBtn.disabled = false;
+  } else {
+    activeImportPayload = null;
+    if (previewBox) previewBox.classList.add('hidden');
+
+    if (errorBox) {
+      errorBox.classList.remove('hidden');
+      if (errorText) errorText.textContent = result.error || 'Invalid collection JSON.';
+    }
+
+    if (confirmBtn) confirmBtn.disabled = true;
+  }
+}
+
+function initCollectionImport() {
+  if (typeof document === 'undefined') return;
+
+  const btnOpen = document.getElementById('btn-import-collection');
+  const btnClose = document.getElementById('btn-import-col-close');
+  const btnCancel = document.getElementById('btn-import-col-cancel');
+  const btnConfirm = document.getElementById('btn-import-col-confirm');
+
+  const tabBtnFile = document.getElementById('tab-btn-import-file');
+  const tabBtnPaste = document.getElementById('tab-btn-import-paste');
+
+  const dropzone = document.getElementById('import-dropzone');
+  const fileInput = document.getElementById('input-import-file');
+  const btnRemoveFile = document.getElementById('btn-import-file-remove');
+  const textarea = document.getElementById('input-import-json');
+
+  if (btnOpen) btnOpen.addEventListener('click', openImportCollectionModal);
+  if (btnClose) btnClose.addEventListener('click', closeImportCollectionModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeImportCollectionModal);
+
+  if (tabBtnFile) tabBtnFile.addEventListener('click', () => switchImportTab('file'));
+  if (tabBtnPaste) tabBtnPaste.addEventListener('click', () => switchImportTab('paste'));
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('dragover');
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        handleImportFile(files[0]);
+      }
+    });
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files && fileInput.files.length > 0) {
+        handleImportFile(fileInput.files[0]);
+      }
+    });
+  }
+
+  if (btnRemoveFile) {
+    btnRemoveFile.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetImportModalState();
+    });
+  }
+
+  function handleImportFile(file) {
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.json') && file.type && file.type !== 'application/json') {
+      updateImportPreview({ valid: false, error: 'Only .json files are accepted.' });
+      return;
+    }
+
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      updateImportPreview({ valid: false, error: `File size (${(file.size / (1024 * 1024)).toFixed(2)} MB) exceeds maximum limit of 10 MB.` });
+      return;
+    }
+
+    const fileInfo = document.getElementById('import-file-info');
+    const fileNameEl = document.getElementById('import-file-name');
+    if (fileInfo && fileNameEl) {
+      fileNameEl.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      fileInfo.classList.remove('hidden');
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result;
+      const result = parseAndValidateImportJson(content);
+      updateImportPreview(result);
+    };
+    reader.onerror = () => {
+      updateImportPreview({ valid: false, error: 'Failed to read file from disk.' });
+    };
+    reader.readAsText(file);
+  }
+
+  if (textarea) {
+    textarea.addEventListener('input', () => {
+      const text = textarea.value;
+      if (!text.trim()) {
+        const previewBox = document.getElementById('import-preview-box');
+        const errorBox = document.getElementById('import-error-box');
+        const confirmBtn = document.getElementById('btn-import-col-confirm');
+        if (previewBox) previewBox.classList.add('hidden');
+        if (errorBox) errorBox.classList.add('hidden');
+        if (confirmBtn) confirmBtn.disabled = true;
+        activeImportPayload = null;
+        return;
+      }
+      const result = parseAndValidateImportJson(text);
+      updateImportPreview(result);
+    });
+  }
+
+  if (btnConfirm) {
+    btnConfirm.addEventListener('click', async () => {
+      if (isImportingCollection || !activeImportPayload) return;
+      isImportingCollection = true;
+      btnConfirm.disabled = true;
+      const btnText = document.getElementById('btn-import-confirm-text');
+      if (btnText) btnText.textContent = 'Importing...';
+
+      try {
+        const res = await fetch('/api/collections/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(activeImportPayload)
+        });
+
+        const data = await res.json();
+        if (res.status === 201 && data.success) {
+          closeImportCollectionModal();
+          showToast('Collection Imported', `Successfully imported "${data.data?.name || 'Collection'}" with ${data.data?.requests_count || 0} requests.`, 'success');
+          await loadCollectionsAndSavedRequests();
+        } else {
+          const errMsg = data.error?.message || data.message || `Import failed with status ${res.status}`;
+          updateImportPreview({ valid: false, error: errMsg });
+          showToast('Import Failed', errMsg, 'warning');
+        }
+      } catch (err) {
+        const errMsg = `Network error during import: ${err.message}`;
+        updateImportPreview({ valid: false, error: errMsg });
+        showToast('Connection Error', errMsg, 'warning');
+      } finally {
+        isImportingCollection = false;
+        btnConfirm.disabled = !activeImportPayload;
+        if (btnText) btnText.textContent = 'Import Collection';
+      }
+    });
+  }
+}
+
+/**
+ * Exports a collection to devprobe/v1 JSON and triggers browser download.
+ *
+ * @param {number|string} collectionId - ID of collection to export
+ * @param {string} [collectionName] - Display name for toast and filename
+ */
+async function exportCollectionToJson(collectionId, collectionName = 'collection') {
+  if (!collectionId) return;
+
+  try {
+    const res = await fetch(`/api/collections/${collectionId}/export`);
+    if (!res.ok) {
+      let errData = {};
+      try {
+        errData = await res.json();
+      } catch {}
+      const errMsg = errData.error?.message || errData.message || `Export failed with status ${res.status}`;
+      showToast('Export Failed', errMsg, 'warning');
+      return;
+    }
+
+    const disposition = res.headers.get('content-disposition');
+    let targetFilename = '';
+    if (disposition) {
+      const match = disposition.match(/filename="?([^";]+)"?/i);
+      if (match && match[1]) {
+        targetFilename = match[1];
+      }
+    }
+    if (!targetFilename) {
+      const safeName = String(collectionName || 'collection').replace(/[\r\n"\\/<>:|?*]/g, '_').replace(/\s+/g, '_');
+      targetFilename = `${safeName}.json`;
+    }
+
+    const jsonData = await res.text();
+    downloadFile(jsonData, targetFilename, 'application/json; charset=utf-8');
+    showToast('Collection Exported', `Exported "${collectionName}" successfully.`, 'success');
+  } catch (err) {
+    showToast('Export Error', `Network error during export: ${err.message}`, 'warning');
+  }
+}
+
+let activeDocsCollection = null;
+let cachedMarkdownDoc = '';
+let cachedHtmlDoc = '';
+let isFetchingDocs = false;
+
+async function openApiDocsModal(collectionOrId, collectionName) {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-api-docs');
+  if (!modal) return;
+
+  const colId = typeof collectionOrId === 'object' && collectionOrId !== null ? collectionOrId.id : collectionOrId;
+  const colName = typeof collectionOrId === 'object' && collectionOrId !== null ? collectionOrId.name : (collectionName || 'Collection');
+
+  activeDocsCollection = { id: colId, name: colName };
+  cachedMarkdownDoc = '';
+  cachedHtmlDoc = '';
+
+  const headingEl = document.getElementById('docs-modal-heading');
+  if (headingEl) {
+    headingEl.textContent = `API Documentation — ${colName}`;
+  }
+
+  switchDocsTab('preview');
+
+  const loadingEl = document.getElementById('docs-loading-state');
+  const errorEl = document.getElementById('docs-error-state');
+  const panePreview = document.getElementById('pane-docs-preview');
+  const paneMarkdown = document.getElementById('pane-docs-markdown');
+  const paneHtml = document.getElementById('pane-docs-html');
+
+  if (loadingEl) loadingEl.classList.remove('hidden');
+  if (errorEl) errorEl.classList.add('hidden');
+  if (panePreview) panePreview.classList.add('hidden');
+  if (paneMarkdown) paneMarkdown.classList.add('hidden');
+  if (paneHtml) paneHtml.classList.add('hidden');
+
+  setDocsActionsDisabled(true);
+
+  modal.classList.add('active');
+
+  isFetchingDocs = true;
+  try {
+    const [mdRes, htmlRes] = await Promise.all([
+      fetch(`/api/collections/${colId}/docs/markdown`),
+      fetch(`/api/collections/${colId}/docs/html`)
+    ]);
+
+    if (!mdRes.ok || !htmlRes.ok) {
+      let errText = 'Failed to generate documentation.';
+      try {
+        const errJson = !mdRes.ok ? await mdRes.json() : await htmlRes.json();
+        if (errJson.error?.message) errText = errJson.error.message;
+      } catch {}
+      throw new Error(errText);
+    }
+
+    cachedMarkdownDoc = await mdRes.text();
+    cachedHtmlDoc = await htmlRes.text();
+
+    const mdViewer = document.getElementById('docs-markdown-source');
+    if (mdViewer) mdViewer.value = cachedMarkdownDoc;
+
+    const htmlViewer = document.getElementById('docs-html-source');
+    if (htmlViewer) htmlViewer.value = cachedHtmlDoc;
+
+    const iframe = document.getElementById('docs-preview-iframe');
+    if (iframe) {
+      iframe.srcdoc = cachedHtmlDoc;
+    }
+
+    if (loadingEl) loadingEl.classList.add('hidden');
+    switchDocsTab('preview');
+    setDocsActionsDisabled(false);
+  } catch (err) {
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (errorEl) {
+      errorEl.classList.remove('hidden');
+      const errTextEl = document.getElementById('docs-error-text');
+      if (errTextEl) errTextEl.textContent = err.message || 'Failed to load documentation.';
+    }
+    showToast('Documentation Error', err.message || 'Failed to load documentation', 'warning');
+  } finally {
+    isFetchingDocs = false;
+  }
+}
+
+function closeApiDocsModal() {
+  if (typeof document === 'undefined') return;
+  const modal = document.getElementById('modal-api-docs');
+  if (modal) modal.classList.remove('active');
+
+  const iframe = document.getElementById('docs-preview-iframe');
+  if (iframe) iframe.srcdoc = '';
+
+  const mdViewer = document.getElementById('docs-markdown-source');
+  if (mdViewer) mdViewer.value = '';
+
+  const htmlViewer = document.getElementById('docs-html-source');
+  if (htmlViewer) htmlViewer.value = '';
+
+  cachedMarkdownDoc = '';
+  cachedHtmlDoc = '';
+  activeDocsCollection = null;
+  isFetchingDocs = false;
+}
+
+function switchDocsTab(tabName) {
+  if (typeof document === 'undefined') return;
+  const btnPreview = document.getElementById('btn-docs-tab-preview');
+  const btnMarkdown = document.getElementById('btn-docs-tab-markdown');
+  const btnHtml = document.getElementById('btn-docs-tab-html');
+
+  const panePreview = document.getElementById('pane-docs-preview');
+  const paneMarkdown = document.getElementById('pane-docs-markdown');
+  const paneHtml = document.getElementById('pane-docs-html');
+
+  [btnPreview, btnMarkdown, btnHtml].forEach((b) => b?.classList.remove('active'));
+  [panePreview, paneMarkdown, paneHtml].forEach((p) => {
+    if (p) {
+      p.classList.add('hidden');
+      p.classList.remove('active');
+    }
+  });
+
+  if (tabName === 'markdown') {
+    btnMarkdown?.classList.add('active');
+    paneMarkdown?.classList.remove('hidden');
+    paneMarkdown?.classList.add('active');
+  } else if (tabName === 'html') {
+    btnHtml?.classList.add('active');
+    paneHtml?.classList.remove('hidden');
+    paneHtml?.classList.add('active');
+  } else {
+    btnPreview?.classList.add('active');
+    panePreview?.classList.remove('hidden');
+    panePreview?.classList.add('active');
+  }
+}
+
+function setDocsActionsDisabled(disabled) {
+  if (typeof document === 'undefined') return;
+  const buttons = [
+    document.getElementById('btn-docs-copy-md'),
+    document.getElementById('btn-docs-copy-html'),
+    document.getElementById('btn-docs-download-md'),
+    document.getElementById('btn-docs-download-html')
+  ];
+  buttons.forEach((b) => {
+    if (b) b.disabled = disabled;
+  });
+}
+
+function initApiDocsModal() {
+  if (typeof document === 'undefined') return;
+
+  const btnClose = document.getElementById('btn-docs-modal-close');
+  const btnDismiss = document.getElementById('btn-docs-modal-dismiss');
+
+  const btnTabPreview = document.getElementById('btn-docs-tab-preview');
+  const btnTabMarkdown = document.getElementById('btn-docs-tab-markdown');
+  const btnTabHtml = document.getElementById('btn-docs-tab-html');
+
+  const btnCopyMd = document.getElementById('btn-docs-copy-md');
+  const btnCopyHtml = document.getElementById('btn-docs-copy-html');
+  const btnDownloadMd = document.getElementById('btn-docs-download-md');
+  const btnDownloadHtml = document.getElementById('btn-docs-download-html');
+
+  if (btnClose) btnClose.addEventListener('click', closeApiDocsModal);
+  if (btnDismiss) btnDismiss.addEventListener('click', closeApiDocsModal);
+
+  if (btnTabPreview) btnTabPreview.addEventListener('click', () => switchDocsTab('preview'));
+  if (btnTabMarkdown) btnTabMarkdown.addEventListener('click', () => switchDocsTab('markdown'));
+  if (btnTabHtml) btnTabHtml.addEventListener('click', () => switchDocsTab('html'));
+
+  if (btnCopyMd) {
+    btnCopyMd.addEventListener('click', () => {
+      copyTextToClipboard(cachedMarkdownDoc, 'Markdown Copied', 'Markdown documentation copied to clipboard.');
+    });
+  }
+
+  if (btnCopyHtml) {
+    btnCopyHtml.addEventListener('click', () => {
+      copyTextToClipboard(cachedHtmlDoc, 'HTML Copied', 'HTML documentation source copied to clipboard.');
+    });
+  }
+
+  if (btnDownloadMd) {
+    btnDownloadMd.addEventListener('click', () => {
+      const colName = activeDocsCollection?.name || 'collection';
+      const safeName = colName.replace(/[\r\n"\\/<>:|?*]/g, '_').replace(/\s+/g, '_');
+      downloadFile(cachedMarkdownDoc, `${safeName}-docs.md`, 'text/markdown; charset=utf-8');
+      showToast('Downloaded', `Saved ${safeName}-docs.md`, 'info');
+    });
+  }
+
+  if (btnDownloadHtml) {
+    btnDownloadHtml.addEventListener('click', () => {
+      const colName = activeDocsCollection?.name || 'collection';
+      const safeName = colName.replace(/[\r\n"\\/<>:|?*]/g, '_').replace(/\s+/g, '_');
+      downloadFile(cachedHtmlDoc, `${safeName}-docs.html`, 'text/html; charset=utf-8');
+      showToast('Downloaded', `Saved ${safeName}-docs.html`, 'info');
+    });
+  }
 }
 
 /* ==========================================================================
@@ -6845,7 +7541,25 @@ if (typeof window !== 'undefined') {
     renderTestResultsToUI,
     renderTestResultsError,
     resetTestResultsViewer,
-    renderHistoricalTestResults
+    renderHistoricalTestResults,
+    downloadFile,
+    parseAndValidateImportJson,
+    openImportCollectionModal,
+    closeImportCollectionModal,
+    resetImportModalState,
+    switchImportTab,
+    updateImportPreview,
+    initCollectionImport,
+    exportCollectionToJson,
+    openApiDocsModal,
+    closeApiDocsModal,
+    switchDocsTab,
+    initApiDocsModal,
+    getActiveImportPayload: () => activeImportPayload,
+    setActiveImportPayload: (val) => { activeImportPayload = val; },
+    getActiveDocsCollection: () => activeDocsCollection,
+    getCachedMarkdownDoc: () => cachedMarkdownDoc,
+    getCachedHtmlDoc: () => cachedHtmlDoc
   };
 }
 
@@ -6954,7 +7668,25 @@ if (typeof module !== 'undefined' && module.exports) {
     renderTestResultsToUI,
     renderTestResultsError,
     resetTestResultsViewer,
-    renderHistoricalTestResults
+    renderHistoricalTestResults,
+    downloadFile,
+    parseAndValidateImportJson,
+    openImportCollectionModal,
+    closeImportCollectionModal,
+    resetImportModalState,
+    switchImportTab,
+    updateImportPreview,
+    initCollectionImport,
+    exportCollectionToJson,
+    openApiDocsModal,
+    closeApiDocsModal,
+    switchDocsTab,
+    initApiDocsModal,
+    getActiveImportPayload: () => activeImportPayload,
+    setActiveImportPayload: (val) => { activeImportPayload = val; },
+    getActiveDocsCollection: () => activeDocsCollection,
+    getCachedMarkdownDoc: () => cachedMarkdownDoc,
+    getCachedHtmlDoc: () => cachedHtmlDoc
   };
 }
 
